@@ -15,6 +15,7 @@ interface DraftTask {
   priority: Priority;
   scheduledDate: string;
   scheduledTime: string;
+  completed?: boolean;
 }
 
 const today = new Date().toISOString().slice(0, 10);
@@ -40,10 +41,11 @@ export default function PlanPage() {
   const [mode, setMode] = useState<PlanMode>("import");
   const [projectName, setProjectName] = useState("月度任务计划");
   const [documentText, setDocumentText] = useState(sampleMonthlyPlan);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const importedTasks = useMemo(
-    () => parseMonthlyPlan(documentText, projectName || "月度任务计划"),
-    [documentText, projectName]
+    () => parseMonthlyPlan(documentText, projectName || "月度任务计划", { includeCompleted }),
+    [documentText, includeCompleted, projectName]
   );
 
   const [changeText, setChangeText] = useState("把新学到的商业模式整合进当前产品和内容体系");
@@ -103,7 +105,7 @@ export default function PlanPage() {
               <div>
                 <h2 className="text-sm font-medium">粘贴 Claude 生成的月度任务文档</h2>
                 <p className="mt-1 text-xs text-text-muted">
-                  支持日期标题、Markdown checkbox、普通列表。解析后先预览，再写入任务系统。
+                  支持「5 月 6 日」日期标题、嵌套 checkbox、普通列表。默认只导入每日清单里的未完成任务。
                 </p>
               </div>
               {importMessage ? <span className="text-xs text-text-muted">{importMessage}</span> : null}
@@ -115,6 +117,17 @@ export default function PlanPage() {
                 value={projectName}
               />
             </Field>
+            <label className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border-default px-3 py-2">
+              <span>
+                <span className="block text-sm font-medium">包含已完成任务</span>
+                <span className="text-xs text-text-muted">关闭时会跳过 - [x]，适合继续执行剩余计划。</span>
+              </span>
+              <input
+                checked={includeCompleted}
+                onChange={(event) => setIncludeCompleted(event.target.checked)}
+                type="checkbox"
+              />
+            </label>
             <textarea
               className="mt-3 min-h-[420px] w-full resize-y rounded-md border border-border-default bg-bg-default px-3 py-2 font-mono text-sm outline-none focus:border-border-focus"
               onChange={(event) => {
@@ -282,6 +295,7 @@ function DraftPreview({ title, tasks, emptyText }: { title: string; tasks: Draft
             <h3 className="line-clamp-2 text-sm font-medium">{task.title}</h3>
             <p className="mt-1 text-xs text-text-muted">
               {task.scheduledDate} {task.scheduledTime} · {task.project || "未归属"} · {task.estimatedMinutes} 分钟
+              {task.completed ? " · 已完成" : ""}
             </p>
           </article>
         ))}
@@ -299,32 +313,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function parseMonthlyPlan(input: string, project: string): DraftTask[] {
+function parseMonthlyPlan(input: string, project: string, options: { includeCompleted: boolean }): DraftTask[] {
   const now = new Date();
   let currentDate = today;
+  let hasDailyDate = false;
   const tasks: DraftTask[] = [];
 
   for (const rawLine of input.split(/\r?\n/)) {
-    const line = rawLine.trim();
+    const line = stripMarkdownQuote(rawLine).trim();
     if (!line) continue;
 
     const headingDate = parseDateHeading(line, now);
     if (headingDate) {
       currentDate = headingDate;
+      hasDailyDate = true;
       continue;
     }
 
-    const taskTitle = normalizeTaskLine(line);
-    if (!taskTitle) continue;
-    if (isLikelyHeading(taskTitle)) continue;
+    if (!hasDailyDate) continue;
+
+    const parsedLine = normalizeTaskLine(line);
+    if (!parsedLine) continue;
+    if (!options.includeCompleted && parsedLine.completed) continue;
+    if (isLikelyHeading(parsedLine.title)) continue;
 
     tasks.push({
-      title: taskTitle,
+      title: parsedLine.title,
       project,
-      estimatedMinutes: inferMinutes(taskTitle),
-      priority: inferPriority(taskTitle),
+      estimatedMinutes: inferMinutes(parsedLine.title),
+      priority: inferPriority(parsedLine.title),
       scheduledDate: currentDate,
-      scheduledTime: inferTime(taskTitle, tasks.filter((task) => task.scheduledDate === currentDate).length)
+      scheduledTime: inferTime(parsedLine.title, tasks.filter((task) => task.scheduledDate === currentDate).length),
+      completed: parsedLine.completed
     });
   }
 
@@ -388,30 +408,53 @@ function buildGoalTasks(goal: string, goalType: GoalType): DraftTask[] {
 }
 
 function parseDateHeading(line: string, now: Date) {
-  const fullDate = line.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+  const normalized = line.replace(/\s+/g, " ");
+  const fullDate = normalized.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
   if (fullDate) return toDateInput(new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3])));
 
-  const monthDay = line.match(/(?:^|[#\s-])(\d{1,2})[月/](\d{1,2})[日号]?/);
+  const monthDay = normalized.match(/(?:^|[#\s🗓️📅—-])(\d{1,2})\s*(?:月|\/)\s*(\d{1,2})\s*[日号]?/);
   if (monthDay) return toDateInput(new Date(now.getFullYear(), Number(monthDay[1]) - 1, Number(monthDay[2])));
 
   return null;
 }
 
 function normalizeTaskLine(line: string) {
+  const checkbox = line.match(/^\s*[-*+]\s+\[([ xX])\]\s*(.+)$/);
+  if (checkbox) {
+    const title = cleanupTaskTitle(checkbox[2]);
+    if (!title) return null;
+    return { title, completed: checkbox[1].toLowerCase() === "x" };
+  }
+
   const normalized = line
     .replace(/^#{1,6}\s*/, "")
-    .replace(/^[-*+]\s+\[[ xX]\]\s*/, "")
     .replace(/^[-*+]\s+/, "")
     .replace(/^\d+[.)、]\s*/, "")
     .trim();
 
   if (!normalized) return null;
   if (/^(周[一二三四五六日天]|星期[一二三四五六日天])$/.test(normalized)) return null;
-  return normalized;
+  if (!/^[-*+\d]/.test(line.trim()) && normalized.length > 40) return null;
+  const title = cleanupTaskTitle(normalized);
+  if (!title) return null;
+  return { title, completed: false };
+}
+
+function stripMarkdownQuote(line: string) {
+  return line.replace(/^\s*>\s?/, "");
+}
+
+function cleanupTaskTitle(title: string) {
+  return title
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/[✅⭐⚠️🆕🎯🌅🌞🌤️🌆🌃🌙🌌🛌]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isLikelyHeading(line: string) {
-  return line.length <= 18 && /(计划|目标|阶段|复盘|安排|任务清单)$/.test(line);
+  return line.length <= 24 && /(计划|目标|阶段|复盘|安排|任务清单|核心目标|完成标志|标准节奏)$/.test(line);
 }
 
 function inferMinutes(title: string) {
