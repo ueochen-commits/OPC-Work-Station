@@ -1,6 +1,7 @@
 "use client";
 
 import { Pause, RotateCcw, Trash2 } from "lucide-react";
+import { SmartInputBox } from "@/components/tasks/smart-input-box";
 import { TaskComposer } from "@/components/tasks/task-composer";
 import { useLocalWorkspace } from "@/lib/local/tasks";
 import type { EnergyMode } from "@/types/domain";
@@ -83,8 +84,24 @@ export default function TodayPage() {
         </div>
       ) : null}
 
-      <div className="mb-6">
-        <TaskComposer onAdd={addTask} />
+      <div className="mb-4">
+        <SmartInputBox
+          existingTaskCount={todayTasks.length}
+          onCreate={addTask}
+          showReasoning={settings.showAiReasoning}
+        />
+      </div>
+
+      <details className="mb-6 rounded-lg border border-border-default bg-bg-subtle">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">表单输入兜底</summary>
+        <div className="border-t border-border-default p-3">
+          <TaskComposer onAdd={addTask} />
+        </div>
+      </details>
+
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium">今日任务</h2>
+        <span className="text-xs text-text-muted">点击任务标题可切换完成状态</span>
       </div>
 
       <section className="space-y-1">
