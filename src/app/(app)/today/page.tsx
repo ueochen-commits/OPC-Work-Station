@@ -30,6 +30,8 @@ export default function TodayPage() {
     scheduledMinutes,
     storageMode,
     syncError,
+    canWrite,
+    readOnlyReason,
     setSettings,
     addTask,
     toggleTask,
@@ -93,6 +95,12 @@ export default function TodayPage() {
         </div>
       ) : null}
 
+      {!canWrite && readOnlyReason ? (
+        <div className="mb-4 rounded-lg border border-border-default bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-fg)]">
+          {readOnlyReason}
+        </div>
+      ) : null}
+
       {settings.energyMode === "paused" ? (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-border-default bg-bg-subtle px-4 py-3 text-sm text-text-muted">
           <Pause size={16} />
@@ -102,6 +110,7 @@ export default function TodayPage() {
 
       <div className="mb-4">
         <SmartInputBox
+          disabled={!canWrite}
           existingTaskCount={todayTasks.length}
           onCreate={addTask}
           showReasoning={settings.showAiReasoning}
@@ -111,7 +120,7 @@ export default function TodayPage() {
       <details className="mb-6 rounded-lg border border-border-default bg-bg-subtle">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">表单输入兜底</summary>
         <div className="border-t border-border-default p-3">
-          <TaskComposer onAdd={addTask} />
+          <TaskComposer disabled={!canWrite} onAdd={addTask} />
         </div>
       </details>
 
@@ -153,12 +162,14 @@ export default function TodayPage() {
                 aria-label={`完成 ${task.title}`}
                 checked={task.status === "completed"}
                 className="mt-1 size-4"
+                disabled={!canWrite}
                 onChange={() => toggleTask(task.id)}
                 type="checkbox"
               />
               <button
                 aria-label={`顺延 ${task.title}`}
                 className="rounded-md p-1 text-text-muted hover:bg-bg-hover"
+                disabled={!canWrite}
                 onClick={() => postponeTask(task.id)}
               >
                 <RotateCcw size={15} />
@@ -166,6 +177,7 @@ export default function TodayPage() {
               <button
                 aria-label={`取消 ${task.title}`}
                 className="rounded-md p-1 text-text-muted hover:bg-bg-hover"
+                disabled={!canWrite}
                 onClick={() => cancelTask(task.id)}
               >
                 <Trash2 size={15} />

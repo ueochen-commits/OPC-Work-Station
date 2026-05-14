@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseLocalNaturalTask } from "@/lib/local/natural-language";
+import { parseLocalOutcomeReport } from "@/lib/local/outcome-language";
 
 describe("parseLocalNaturalTask", () => {
   it("extracts a client task with duration and priority", () => {
@@ -18,5 +19,19 @@ describe("parseLocalNaturalTask", () => {
     expect(task.project).toBe("内容矩阵");
     expect(task.estimatedMinutes).toBe(60);
     expect(task.scheduledTime).toBe("14:00");
+  });
+});
+
+describe("parseLocalOutcomeReport", () => {
+  it("extracts multiple outcome metrics from one sentence", () => {
+    const report = parseLocalOutcomeReport("抖音今天播放 4.2 万，点赞 1500，涨粉 80");
+
+    expect(report.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "抖音", metricKey: "播放", metricValue: 42000 }),
+        expect.objectContaining({ platform: "抖音", metricKey: "点赞", metricValue: 1500 }),
+        expect.objectContaining({ platform: "抖音", metricKey: "涨粉", metricValue: 80 })
+      ])
+    );
   });
 });

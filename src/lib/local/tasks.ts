@@ -37,9 +37,26 @@ export interface LocalOutcomeMetric {
   createdAt: string;
 }
 
+export interface LocalWeeklySelfReview {
+  id: string;
+  weekStartDate: string;
+  mostSatisfied: string | null;
+  mostFrustrated: string | null;
+  nextWeekFocus: string | null;
+  updatedAt: string;
+}
+
+export interface LocalSubscription {
+  plan: "trial" | "basic" | "pro";
+  status: "trialing" | "active" | "past_due" | "expired";
+  trialEndsAt: string | null;
+  currentPeriodEnd: string | null;
+}
+
 const TASKS_KEY = "opc.local.tasks";
 const SETTINGS_KEY = "opc.local.settings";
 const OUTCOMES_KEY = "opc.local.outcomes";
+const WEEKLY_REVIEWS_KEY = "opc.local.weekly-reviews";
 
 const defaultSettings: LocalSettings = {
   dailyCapacityMinutes: 360,
@@ -98,6 +115,8 @@ const starterTasks: LocalTask[] = [
 export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [outcomes, setOutcomes] = useState<LocalOutcomeMetric[]>([]);
+  const [weeklyReviews, setWeeklyReviews] = useState<LocalWeeklySelfReview[]>([]);
+  const [subscription, setSubscription] = useState<LocalSubscription | null>(null);
   const [settings, setSettings] = useState<LocalSettings>(defaultSettings);
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -114,6 +133,7 @@ export function useLocalWorkspace() {
       if (!hasSupabaseBrowserConfig()) {
         loadLocalTasks();
         loadLocalOutcomes();
+        loadLocalWeeklyReviews();
         return;
       }
 
@@ -124,6 +144,7 @@ export function useLocalWorkspace() {
       if (!user) {
         loadLocalTasks();
         loadLocalOutcomes();
+        loadLocalWeeklyReviews();
         return;
       }
 
@@ -152,6 +173,22 @@ export function useLocalWorkspace() {
 
       if (outcomeError) setSyncError(outcomeError.message);
 
+      const { data: reviewData, error: reviewError } = await supabase
+        .from("weekly_self_reviews")
+        .select("id,week_start_date,most_satisfied,most_frustrated,next_week_focus,updated_at")
+        .eq("user_id", user.id)
+        .order("week_start_date", { ascending: false });
+
+      if (reviewError) setSyncError(reviewError.message);
+
+      const { data: subscriptionData, error: subscriptionError } = await supabase
+        .from("subscriptions")
+        .select("plan,status,trial_ends_at,current_period_end")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (subscriptionError) setSyncError(subscriptionError.message);
+
       setUserId(user.id);
       setStorageMode("supabase");
       setTasks((data || []).map(taskRowToLocalTask));
@@ -165,6 +202,26 @@ export function useLocalWorkspace() {
           rawInput: row.raw_input,
           createdAt: row.created_at
         }))
+      );
+      setWeeklyReviews(
+        (reviewData || []).map((row) => ({
+          id: row.id,
+          weekStartDate: row.week_start_date,
+          mostSatisfied: row.most_satisfied,
+          mostFrustrated: row.most_frustrated,
+          nextWeekFocus: row.next_week_focus,
+          updatedAt: row.updated_at
+        }))
+      );
+      setSubscription(
+        subscriptionData
+          ? {
+              plan: subscriptionData.plan,
+              status: subscriptionData.status,
+              trialEndsAt: subscriptionData.trial_ends_at,
+              currentPeriodEnd: subscriptionData.current_period_end
+            }
+          : null
       );
       setReady(true);
     }
@@ -181,12 +238,19 @@ export function useLocalWorkspace() {
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
     }
 
+    function loadLocalWeeklyReviews() {
+      const storedReviews = window.localStorage.getItem(WEEKLY_REVIEWS_KEY);
+      setWeeklyReviews(storedReviews ? (JSON.parse(storedReviews) as LocalWeeklySelfReview[]) : []);
+    }
+
     loadWorkspace().catch((error) => {
       setSyncError(error instanceof Error ? error.message : "Workspace load failed");
       const storedTasks = window.localStorage.getItem(TASKS_KEY);
       const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
+      const storedReviews = window.localStorage.getItem(WEEKLY_REVIEWS_KEY);
       setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
+      setWeeklyReviews(storedReviews ? (JSON.parse(storedReviews) as LocalWeeklySelfReview[]) : []);
       setReady(true);
     });
 
@@ -204,6 +268,10 @@ export function useLocalWorkspace() {
   }, [ready, storageMode, outcomes]);
 
   useEffect(() => {
+    if (ready && storageMode === "local") window.localStorage.setItem(WEEKLY_REVIEWS_KEY, JSON.stringify(weeklyReviews));
+  }, [ready, storageMode, weeklyReviews]);
+
+  useEffect(() => {
     if (ready) window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }, [ready, settings]);
 
@@ -218,6 +286,15 @@ export function useLocalWorkspace() {
   const scheduledMinutes = todayTasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
+  const canWrite = storageMode === "local" || hasWriteAccess(subscription);
+  const readOnlyReason =
+    storageMode === "supabase" && !canWrite ? "试用或订阅已到期，请在设置页订阅后继续编辑。" : null;
+
+  function ensureWritable() {
+    if (canWrite) return true;
+    setSyncError(readOnlyReason || "当前账号为只读状态。");
+    return false;
+  }
 
   async function addTask(input: {
     title: string;
@@ -227,6 +304,8 @@ export function useLocalWorkspace() {
     scheduledDate: string;
     scheduledTime: string;
   }) {
+    if (!ensureWritable()) return;
+
     const task: LocalTask = {
       id: crypto.randomUUID(),
       title: input.title,
@@ -275,6 +354,8 @@ export function useLocalWorkspace() {
   }
 
   async function toggleTask(taskId: string) {
+    if (!ensureWritable()) return;
+
     const target = tasks.find((task) => task.id === taskId);
     const completed = target?.status !== "completed";
     setTasks((current) =>
@@ -303,6 +384,8 @@ export function useLocalWorkspace() {
   }
 
   async function postponeTask(taskId: string) {
+    if (!ensureWritable()) return;
+
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const nextDate = tomorrow.toISOString().slice(0, 10);
@@ -329,6 +412,8 @@ export function useLocalWorkspace() {
   }
 
   async function cancelTask(taskId: string) {
+    if (!ensureWritable()) return;
+
     setTasks((current) =>
       current.map((task) => (task.id === taskId ? { ...task, status: "cancelled" } : task))
     );
@@ -342,6 +427,8 @@ export function useLocalWorkspace() {
   }
 
   async function updateTaskStatus(taskId: string, status: TaskStatus) {
+    if (!ensureWritable()) return;
+
     const target = tasks.find((task) => task.id === taskId);
     const completedAt = status === "completed" ? new Date().toISOString() : null;
 
@@ -373,6 +460,8 @@ export function useLocalWorkspace() {
   }
 
   async function updateTaskDescription(taskId: string, description: string) {
+    if (!ensureWritable()) return;
+
     const before = tasks.find((task) => task.id === taskId)?.description ?? null;
     setTasks((current) =>
       current.map((task) => (task.id === taskId ? { ...task, description: description || null } : task))
@@ -396,6 +485,8 @@ export function useLocalWorkspace() {
     metricValue: number;
     rawInput?: string;
   }) {
+    if (!ensureWritable()) return;
+
     const metric: LocalOutcomeMetric = {
       id: crypto.randomUUID(),
       metricDate: input.metricDate,
@@ -453,6 +544,81 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function addOutcomeMetrics(metrics: Array<{
+    metricDate: string;
+    platform: string;
+    metricKey: string;
+    metricValue: number;
+    rawInput?: string;
+  }>) {
+    if (!ensureWritable()) return;
+
+    for (const metric of metrics) {
+      await addOutcomeMetric(metric);
+    }
+  }
+
+  async function saveWeeklySelfReview(input: {
+    weekStartDate: string;
+    mostSatisfied: string;
+    mostFrustrated: string;
+    nextWeekFocus: string;
+  }) {
+    if (!ensureWritable()) return;
+
+    const review: LocalWeeklySelfReview = {
+      id: crypto.randomUUID(),
+      weekStartDate: input.weekStartDate,
+      mostSatisfied: input.mostSatisfied || null,
+      mostFrustrated: input.mostFrustrated || null,
+      nextWeekFocus: input.nextWeekFocus || null,
+      updatedAt: new Date().toISOString()
+    };
+
+    setWeeklyReviews((current) => [
+      review,
+      ...current.filter((item) => item.weekStartDate !== input.weekStartDate)
+    ]);
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("weekly_self_reviews")
+        .upsert(
+          {
+            user_id: userId,
+            week_start_date: input.weekStartDate,
+            most_satisfied: input.mostSatisfied || null,
+            most_frustrated: input.mostFrustrated || null,
+            next_week_focus: input.nextWeekFocus || null
+          },
+          { onConflict: "user_id,week_start_date" }
+        )
+        .select("id,week_start_date,most_satisfied,most_frustrated,next_week_focus,updated_at")
+        .single();
+
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+
+      if (data) {
+        const saved: LocalWeeklySelfReview = {
+          id: data.id,
+          weekStartDate: data.week_start_date,
+          mostSatisfied: data.most_satisfied,
+          mostFrustrated: data.most_frustrated,
+          nextWeekFocus: data.next_week_focus,
+          updatedAt: data.updated_at
+        };
+        setWeeklyReviews((current) => [
+          saved,
+          ...current.filter((item) => item.weekStartDate !== saved.weekStartDate)
+        ]);
+      }
+    }
+  }
+
   async function recordTaskHistory(taskId: string, eventType: string, beforeValue: unknown, afterValue: unknown) {
     if (storageMode !== "supabase" || !userId) return;
 
@@ -474,6 +640,10 @@ export function useLocalWorkspace() {
     tasks,
     todayTasks,
     outcomes,
+    weeklyReviews,
+    subscription,
+    canWrite,
+    readOnlyReason,
     settings,
     scheduledMinutes,
     storageMode,
@@ -485,6 +655,16 @@ export function useLocalWorkspace() {
     cancelTask,
     updateTaskStatus,
     updateTaskDescription,
-    addOutcomeMetric
+    addOutcomeMetric,
+    addOutcomeMetrics,
+    saveWeeklySelfReview
   };
+}
+
+function hasWriteAccess(subscription: LocalSubscription | null) {
+  if (!subscription) return true;
+  if (subscription.status === "active") return true;
+  if (subscription.status !== "trialing") return false;
+  if (!subscription.trialEndsAt) return true;
+  return new Date(subscription.trialEndsAt).getTime() > Date.now();
 }

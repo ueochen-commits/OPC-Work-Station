@@ -1,17 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocalWorkspace } from "@/lib/local/tasks";
+import { parseLocalOutcomeReport } from "@/lib/local/outcome-language";
 
 export default function RetroPage() {
-  const { tasks, outcomes, addOutcomeMetric, storageMode, syncError } = useLocalWorkspace();
+  const {
+    tasks,
+    outcomes,
+    weeklyReviews,
+    addOutcomeMetric,
+    addOutcomeMetrics,
+    saveWeeklySelfReview,
+    storageMode,
+    syncError,
+    canWrite,
+    readOnlyReason
+  } = useLocalWorkspace();
+  const weekStartDate = useMemo(() => getWeekStartDate(new Date()), []);
   const [mostSatisfied, setMostSatisfied] = useState("");
   const [mostFrustrated, setMostFrustrated] = useState("");
   const [nextFocus, setNextFocus] = useState("");
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [metricDate, setMetricDate] = useState(new Date().toISOString().slice(0, 10));
   const [platform, setPlatform] = useState("抖音");
   const [metricKey, setMetricKey] = useState("播放");
   const [metricValue, setMetricValue] = useState("");
+  const [rawReport, setRawReport] = useState("");
+  const [parseMessage, setParseMessage] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.status === "completed").length;
@@ -30,6 +46,17 @@ export default function RetroPage() {
     }
     return Array.from(map, ([name, metrics]) => ({ name, metrics: metrics.slice(0, 6) }));
   }, [outcomes]);
+  const currentReview = useMemo(
+    () => weeklyReviews.find((review) => review.weekStartDate === weekStartDate),
+    [weekStartDate, weeklyReviews]
+  );
+
+  useEffect(() => {
+    if (!currentReview) return;
+    setMostSatisfied(currentReview.mostSatisfied || "");
+    setMostFrustrated(currentReview.mostFrustrated || "");
+    setNextFocus(currentReview.nextWeekFocus || "");
+  }, [currentReview]);
 
   return (
     <div>
@@ -49,12 +76,44 @@ export default function RetroPage() {
       </header>
 
       <section className="mb-5 rounded-lg border border-border-default p-4">
-        <h2 className="mb-3 text-sm font-medium">这周你怎么看？</h2>
-        <div className="grid gap-3">
-          <ReviewInput label="最满意的一件事" onChange={setMostSatisfied} value={mostSatisfied} />
-          <ReviewInput label="最受挫的一件事" onChange={setMostFrustrated} value={mostFrustrated} />
-          <ReviewInput label="下周想专注的方向" onChange={setNextFocus} value={nextFocus} />
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">这周你怎么看？</h2>
+            <p className="mt-1 text-xs text-text-muted">本周从 {weekStartDate} 开始，自评会参与后续 AI 周报洞察。</p>
+          </div>
+          {reviewMessage ? <span className="text-xs text-text-muted">{reviewMessage}</span> : null}
         </div>
+        {!canWrite && readOnlyReason ? (
+          <div className="mb-3 rounded-md border border-border-default bg-[var(--warning-bg)] px-3 py-2 text-sm text-[var(--warning-fg)]">
+            {readOnlyReason}
+          </div>
+        ) : null}
+        <form
+          className="grid gap-3"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!canWrite) return;
+            await saveWeeklySelfReview({
+              weekStartDate,
+              mostSatisfied,
+              mostFrustrated,
+              nextWeekFocus: nextFocus
+            });
+            setReviewMessage("已保存");
+          }}
+        >
+          <ReviewInput disabled={!canWrite} label="最满意的一件事" onChange={setMostSatisfied} value={mostSatisfied} />
+          <ReviewInput disabled={!canWrite} label="最受挫的一件事" onChange={setMostFrustrated} value={mostFrustrated} />
+          <ReviewInput disabled={!canWrite} label="下周想专注的方向" onChange={setNextFocus} value={nextFocus} />
+          <div className="flex justify-end">
+            <button
+              className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse disabled:opacity-50"
+              disabled={!canWrite}
+            >
+              保存自评
+            </button>
+          </div>
+        </form>
       </section>
 
       <section className="grid gap-3 md:grid-cols-3">
@@ -67,13 +126,59 @@ export default function RetroPage() {
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-medium">每日数据回报</h2>
-            <p className="mt-1 text-xs text-text-muted">先手动录入指标，后续会接自然语言数据解析。</p>
+            <p className="mt-1 text-xs text-text-muted">可以一句话录入，也可以用表单补充单个指标。</p>
           </div>
         </div>
+
+        <form
+          className="mb-4 rounded-md border border-border-default bg-bg-subtle p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canWrite) return;
+            const parsed = parseLocalOutcomeReport(rawReport);
+            if (parsed.metrics.length === 0) {
+              setParseMessage("没有识别到明确指标。试试：抖音今天播放 4 万，点赞 1500，涨粉 80");
+              return;
+            }
+            addOutcomeMetrics(
+              parsed.metrics.map((metric) => ({
+                metricDate: parsed.metricDate,
+                platform: metric.platform,
+                metricKey: metric.metricKey,
+                metricValue: metric.metricValue,
+                rawInput: rawReport
+              }))
+            );
+            setParseMessage(parsed.reasoning);
+            setRawReport("");
+          }}
+        >
+          <label>
+            <span className="mb-1 block text-xs font-medium text-text-muted">自然语言回报</span>
+            <textarea
+              className="min-h-[72px] w-full resize-none rounded-md border border-border-default bg-bg-default px-3 py-2 text-sm outline-none focus:border-border-focus"
+              disabled={!canWrite}
+              onChange={(event) => setRawReport(event.target.value)}
+              placeholder="例如：抖音今天播放 4.2 万，点赞 1500，涨粉 80"
+              value={rawReport}
+            />
+          </label>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-text-muted">{parseMessage || "支持中文数字单位：万、千、w、k。"}</p>
+            <button
+              className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse disabled:opacity-50"
+              disabled={!canWrite}
+            >
+              解析并保存
+            </button>
+          </div>
+        </form>
+
         <form
           className="grid gap-3 md:grid-cols-[150px_1fr_1fr_140px_auto]"
           onSubmit={(event) => {
             event.preventDefault();
+            if (!canWrite) return;
             const value = Number(metricValue);
             if (!Number.isFinite(value)) return;
             addOutcomeMetric({
@@ -89,6 +194,7 @@ export default function RetroPage() {
           <Field label="日期">
             <input
               className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2"
+              disabled={!canWrite}
               onChange={(event) => setMetricDate(event.target.value)}
               type="date"
               value={metricDate}
@@ -97,6 +203,7 @@ export default function RetroPage() {
           <Field label="平台">
             <input
               className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3"
+              disabled={!canWrite}
               onChange={(event) => setPlatform(event.target.value)}
               value={platform}
             />
@@ -104,6 +211,7 @@ export default function RetroPage() {
           <Field label="指标">
             <input
               className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3"
+              disabled={!canWrite}
               onChange={(event) => setMetricKey(event.target.value)}
               value={metricKey}
             />
@@ -111,6 +219,7 @@ export default function RetroPage() {
           <Field label="数值">
             <input
               className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3"
+              disabled={!canWrite}
               onChange={(event) => setMetricValue(event.target.value)}
               placeholder="42000"
               type="number"
@@ -118,7 +227,10 @@ export default function RetroPage() {
             />
           </Field>
           <div className="flex items-end">
-            <button className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse">
+            <button
+              className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse disabled:opacity-50"
+              disabled={!canWrite}
+            >
               保存
             </button>
           </div>
@@ -155,10 +267,12 @@ export default function RetroPage() {
 }
 
 function ReviewInput({
+  disabled = false,
   label,
   value,
   onChange
 }: {
+  disabled?: boolean;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -168,6 +282,7 @@ function ReviewInput({
       <span className="mb-1 block text-xs font-medium text-text-muted">{label}</span>
       <input
         className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 outline-none focus:border-border-focus"
+        disabled={disabled}
         maxLength={100}
         onChange={(event) => onChange(event.target.value)}
         value={value}
@@ -192,4 +307,19 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   );
+}
+
+function getWeekStartDate(date: Date) {
+  const current = new Date(date);
+  const day = current.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  current.setDate(current.getDate() + diff);
+  return toDateInput(current);
+}
+
+function toDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

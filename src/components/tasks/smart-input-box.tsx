@@ -24,10 +24,12 @@ const chips = [
 export function SmartInputBox({
   existingTaskCount,
   showReasoning,
+  disabled = false,
   onCreate
 }: {
   existingTaskCount: number;
   showReasoning: boolean;
+  disabled?: boolean;
   onCreate: (task: {
     title: string;
     project?: string;
@@ -46,6 +48,7 @@ export function SmartInputBox({
 
   async function parse() {
     if (!input.trim()) return;
+    if (disabled) return;
     setSubmitting(true);
     setWarning(null);
 
@@ -73,6 +76,7 @@ export function SmartInputBox({
 
   function create() {
     if (!parsed) return;
+    if (disabled) return;
     onCreate(parsed);
     setInput("");
     setParsed(null);
@@ -92,6 +96,7 @@ export function SmartInputBox({
       <div className="p-4">
         <textarea
           className="min-h-[72px] w-full resize-none rounded-md border border-border-default bg-bg-default px-3 py-2 text-base outline-none focus:border-border-focus"
+          disabled={disabled}
           onChange={(event) => {
             setInput(event.target.value);
             setParsed(null);
@@ -112,6 +117,7 @@ export function SmartInputBox({
             {chips.map((chip) => (
               <button
                 className="h-7 rounded-md bg-bg-muted px-2.5 text-xs text-text-muted hover:bg-bg-hover"
+                disabled={disabled}
                 key={chip.label}
                 onClick={() => setInput(chip.value)}
               >
@@ -146,6 +152,7 @@ export function SmartInputBox({
               </button>
               <button
                 className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse hover:bg-accent-hover"
+                disabled={disabled}
                 onClick={create}
               >
                 确认创建
@@ -163,7 +170,7 @@ export function SmartInputBox({
         <div className="mt-3 flex justify-end">
           <button
             className="flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse hover:bg-accent-hover disabled:opacity-50"
-            disabled={!input.trim() || submitting}
+            disabled={disabled || !input.trim() || submitting}
             onClick={parse}
           >
             {submitting ? <Loader2 className="animate-spin" size={15} /> : <Wand2 size={15} />}

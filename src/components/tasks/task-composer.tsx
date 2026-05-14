@@ -6,8 +6,10 @@ import type { Priority } from "@/types/domain";
 const today = new Date().toISOString().slice(0, 10);
 
 export function TaskComposer({
+  disabled = false,
   onAdd
 }: {
+  disabled?: boolean;
   onAdd: (task: {
     title: string;
     project?: string;
@@ -29,6 +31,7 @@ export function TaskComposer({
       className="rounded-lg border border-border-default bg-bg-default p-4"
       onSubmit={(event) => {
         event.preventDefault();
+        if (disabled) return;
         if (!title.trim()) return;
         onAdd({
           title: title.trim(),
@@ -48,6 +51,7 @@ export function TaskComposer({
         </label>
         <input
           className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 outline-none focus:border-border-focus"
+          disabled={disabled}
           id="task-title"
           onChange={(event) => setTitle(event.target.value)}
           placeholder="例如：明天上午写个广告脚本"
@@ -59,6 +63,7 @@ export function TaskComposer({
         <Field label="项目">
           <input
             className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 outline-none focus:border-border-focus"
+            disabled={disabled}
             onChange={(event) => setProject(event.target.value)}
             placeholder="可选"
             value={project}
@@ -67,6 +72,7 @@ export function TaskComposer({
         <Field label="时长">
           <select
             className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2"
+            disabled={disabled}
             onChange={(event) => setEstimatedMinutes(Number(event.target.value))}
             value={estimatedMinutes}
           >
@@ -80,6 +86,7 @@ export function TaskComposer({
         <Field label="优先级">
           <select
             className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2"
+            disabled={disabled}
             onChange={(event) => setPriority(event.target.value as Priority)}
             value={priority}
           >
@@ -92,6 +99,7 @@ export function TaskComposer({
         <Field label="日期">
           <input
             className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2"
+            disabled={disabled}
             onChange={(event) => setScheduledDate(event.target.value)}
             type="date"
             value={scheduledDate}
@@ -100,6 +108,7 @@ export function TaskComposer({
         <Field label="时间">
           <input
             className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2"
+            disabled={disabled}
             onChange={(event) => setScheduledTime(event.target.value)}
             type="time"
             value={scheduledTime}
@@ -108,7 +117,10 @@ export function TaskComposer({
       </div>
 
       <div className="mt-4 flex justify-end">
-        <button className="h-8 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse hover:bg-accent-hover">
+        <button
+          className="h-8 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse hover:bg-accent-hover disabled:opacity-50"
+          disabled={disabled}
+        >
           创建任务
         </button>
       </div>

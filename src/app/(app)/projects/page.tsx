@@ -23,7 +23,7 @@ const priorityLabel = {
 };
 
 export default function ProjectsPage() {
-  const { tasks, updateTaskStatus } = useLocalWorkspace();
+  const { tasks, updateTaskStatus, canWrite, readOnlyReason } = useLocalWorkspace();
   const [view, setView] = useState<"list" | "board">("list");
   const [projectFilter, setProjectFilter] = useState("全部");
   const projects = useMemo(() => {
@@ -63,6 +63,12 @@ export default function ProjectsPage() {
           添加任务
         </Link>
       </header>
+
+      {!canWrite && readOnlyReason ? (
+        <div className="mb-5 rounded-lg border border-border-default bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-fg)]">
+          {readOnlyReason}
+        </div>
+      ) : null}
 
       <div className="mb-5 grid gap-3 md:grid-cols-2">
         {projects.map((project) => (
@@ -139,9 +145,9 @@ export default function ProjectsPage() {
         </div>
 
         {view === "list" ? (
-          <TaskList tasks={visibleTasks} onStatusChange={updateTaskStatus} />
+          <TaskList canWrite={canWrite} tasks={visibleTasks} onStatusChange={updateTaskStatus} />
         ) : (
-          <TaskBoard tasks={visibleTasks} onStatusChange={updateTaskStatus} />
+          <TaskBoard canWrite={canWrite} tasks={visibleTasks} onStatusChange={updateTaskStatus} />
         )}
       </section>
     </div>
@@ -150,9 +156,11 @@ export default function ProjectsPage() {
 
 function TaskList({
   tasks,
+  canWrite = true,
   onStatusChange
 }: {
   tasks: LocalTask[];
+  canWrite?: boolean;
   onStatusChange: (taskId: string, status: TaskStatus) => void;
 }) {
   return (
@@ -166,7 +174,7 @@ function TaskList({
             </h3>
             <div className="space-y-1">
               {groupTasks.map((task) => (
-                <TaskRow key={task.id} onStatusChange={onStatusChange} task={task} />
+                <TaskRow canWrite={canWrite} key={task.id} onStatusChange={onStatusChange} task={task} />
               ))}
             </div>
           </section>
@@ -178,9 +186,11 @@ function TaskList({
 
 function TaskBoard({
   tasks,
+  canWrite,
   onStatusChange
 }: {
   tasks: LocalTask[];
+  canWrite: boolean;
   onStatusChange: (taskId: string, status: TaskStatus) => void;
 }) {
   return (
@@ -194,7 +204,7 @@ function TaskBoard({
             </h3>
             <div className="space-y-2">
               {groupTasks.map((task) => (
-                <TaskCard key={task.id} onStatusChange={onStatusChange} task={task} />
+                <TaskCard canWrite={canWrite} key={task.id} onStatusChange={onStatusChange} task={task} />
               ))}
             </div>
           </section>
@@ -206,9 +216,11 @@ function TaskBoard({
 
 function TaskRow({
   task,
+  canWrite,
   onStatusChange
 }: {
   task: LocalTask;
+  canWrite: boolean;
   onStatusChange: (taskId: string, status: TaskStatus) => void;
 }) {
   return (
@@ -220,16 +232,18 @@ function TaskRow({
         </p>
       </div>
       <div className="text-xs text-text-muted">{task.scheduledDate} {task.scheduledTime}</div>
-      <StatusSelect onChange={(status) => onStatusChange(task.id, status)} value={normalizeStatus(task.status)} />
+      <StatusSelect disabled={!canWrite} onChange={(status) => onStatusChange(task.id, status)} value={normalizeStatus(task.status)} />
     </article>
   );
 }
 
 function TaskCard({
   task,
+  canWrite,
   onStatusChange
 }: {
   task: LocalTask;
+  canWrite: boolean;
   onStatusChange: (taskId: string, status: TaskStatus) => void;
 }) {
   return (
@@ -241,7 +255,7 @@ function TaskCard({
       </p>
       <p className="mt-1 text-xs text-text-muted">{task.scheduledDate} {task.scheduledTime}</p>
       <div className="mt-3">
-        <StatusSelect onChange={(status) => onStatusChange(task.id, status)} value={normalizeStatus(task.status)} />
+        <StatusSelect disabled={!canWrite} onChange={(status) => onStatusChange(task.id, status)} value={normalizeStatus(task.status)} />
       </div>
     </article>
   );
@@ -249,14 +263,17 @@ function TaskCard({
 
 function StatusSelect({
   value,
+  disabled = false,
   onChange
 }: {
   value: TaskStatus;
+  disabled?: boolean;
   onChange: (status: TaskStatus) => void;
 }) {
   return (
     <select
       className="h-8 w-full rounded-md border border-border-default bg-bg-default px-2 text-sm"
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value as TaskStatus)}
       value={value}
     >
