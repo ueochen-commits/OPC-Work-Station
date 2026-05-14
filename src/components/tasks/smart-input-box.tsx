@@ -60,13 +60,14 @@ export function SmartInputBox({
       });
 
       if (!response.ok) {
-        throw new Error("解析请求失败");
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error?.message || "解析请求失败，请稍后再试。");
       }
 
       const data = (await response.json()) as ParseResponse;
       setParsed(data.result);
       setParseSource(data.source);
-      setWarning(data.warning ?? null);
+      setWarning(data.warning ?? formatQuotaWarning(data.quota));
     } catch (error) {
       setWarning(error instanceof Error ? error.message : "解析失败，请使用表单输入兜底。");
     } finally {
@@ -189,4 +190,9 @@ function PreviewItem({ label, value }: { label: string; value: string }) {
       <dd className="truncate text-sm text-text-default">{value}</dd>
     </div>
   );
+}
+
+function formatQuotaWarning(quota: ParseResponse["quota"]) {
+  if (!quota) return null;
+  return `今日 AI 解析已使用 ${quota.used}/${quota.limit} 次。`;
 }

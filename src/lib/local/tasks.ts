@@ -20,6 +20,14 @@ export interface LocalTask {
   completedAt: string | null;
 }
 
+export interface LocalTaskLink {
+  id: string;
+  taskId: string;
+  url: string;
+  title: string | null;
+  addedAt: string;
+}
+
 export interface LocalSettings {
   dailyCapacityMinutes: number;
   energyMode: EnergyMode;
@@ -54,6 +62,7 @@ export interface LocalSubscription {
 }
 
 const TASKS_KEY = "opc.local.tasks";
+const TASK_LINKS_KEY = "opc.local.task-links";
 const SETTINGS_KEY = "opc.local.settings";
 const OUTCOMES_KEY = "opc.local.outcomes";
 const WEEKLY_REVIEWS_KEY = "opc.local.weekly-reviews";
@@ -114,6 +123,7 @@ const starterTasks: LocalTask[] = [
 
 export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
+  const [taskLinks, setTaskLinks] = useState<LocalTaskLink[]>([]);
   const [outcomes, setOutcomes] = useState<LocalOutcomeMetric[]>([]);
   const [weeklyReviews, setWeeklyReviews] = useState<LocalWeeklySelfReview[]>([]);
   const [subscription, setSubscription] = useState<LocalSubscription | null>(null);
@@ -132,6 +142,7 @@ export function useLocalWorkspace() {
 
       if (!hasSupabaseBrowserConfig()) {
         loadLocalTasks();
+        loadLocalTaskLinks();
         loadLocalOutcomes();
         loadLocalWeeklyReviews();
         return;
@@ -143,6 +154,7 @@ export function useLocalWorkspace() {
 
       if (!user) {
         loadLocalTasks();
+        loadLocalTaskLinks();
         loadLocalOutcomes();
         loadLocalWeeklyReviews();
         return;
@@ -161,9 +173,18 @@ export function useLocalWorkspace() {
       if (error) {
         setSyncError(error.message);
         loadLocalTasks();
+        loadLocalTaskLinks();
         loadLocalOutcomes();
         return;
       }
+
+      const { data: linkData, error: linkError } = await supabase
+        .from("task_links")
+        .select("id,task_id,url,title,added_at")
+        .eq("user_id", user.id)
+        .order("added_at", { ascending: false });
+
+      if (linkError) setSyncError(linkError.message);
 
       const { data: outcomeData, error: outcomeError } = await supabase
         .from("outcome_metrics")
@@ -192,6 +213,15 @@ export function useLocalWorkspace() {
       setUserId(user.id);
       setStorageMode("supabase");
       setTasks((data || []).map(taskRowToLocalTask));
+      setTaskLinks(
+        (linkData || []).map((row) => ({
+          id: row.id,
+          taskId: row.task_id,
+          url: row.url,
+          title: row.title,
+          addedAt: row.added_at
+        }))
+      );
       setOutcomes(
         (outcomeData || []).map((row) => ({
           id: row.id,
@@ -233,6 +263,11 @@ export function useLocalWorkspace() {
       setReady(true);
     }
 
+    function loadLocalTaskLinks() {
+      const storedLinks = window.localStorage.getItem(TASK_LINKS_KEY);
+      setTaskLinks(storedLinks ? (JSON.parse(storedLinks) as LocalTaskLink[]) : []);
+    }
+
     function loadLocalOutcomes() {
       const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
@@ -246,9 +281,11 @@ export function useLocalWorkspace() {
     loadWorkspace().catch((error) => {
       setSyncError(error instanceof Error ? error.message : "Workspace load failed");
       const storedTasks = window.localStorage.getItem(TASKS_KEY);
+      const storedLinks = window.localStorage.getItem(TASK_LINKS_KEY);
       const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
       const storedReviews = window.localStorage.getItem(WEEKLY_REVIEWS_KEY);
       setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
+      setTaskLinks(storedLinks ? (JSON.parse(storedLinks) as LocalTaskLink[]) : []);
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
       setWeeklyReviews(storedReviews ? (JSON.parse(storedReviews) as LocalWeeklySelfReview[]) : []);
       setReady(true);
@@ -262,6 +299,10 @@ export function useLocalWorkspace() {
   useEffect(() => {
     if (ready && storageMode === "local") window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
   }, [ready, storageMode, tasks]);
+
+  useEffect(() => {
+    if (ready && storageMode === "local") window.localStorage.setItem(TASK_LINKS_KEY, JSON.stringify(taskLinks));
+  }, [ready, storageMode, taskLinks]);
 
   useEffect(() => {
     if (ready && storageMode === "local") window.localStorage.setItem(OUTCOMES_KEY, JSON.stringify(outcomes));
@@ -478,6 +519,66 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function addTaskLink(input: { taskId: string; url: string; title?: string }) {
+    if (!ensureWritable()) return;
+
+    const normalizedUrl = normalizeUrl(input.url);
+    const link: LocalTaskLink = {
+      id: crypto.randomUUID(),
+      taskId: input.taskId,
+      url: normalizedUrl,
+      title: input.title?.trim() || getUrlHost(normalizedUrl),
+      addedAt: new Date().toISOString()
+    };
+
+    setTaskLinks((current) => [link, ...current]);
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("task_links")
+        .insert({
+          task_id: input.taskId,
+          user_id: userId,
+          url: normalizedUrl,
+          title: link.title
+        })
+        .select("id,task_id,url,title,added_at")
+        .single();
+
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+
+      if (data) {
+        const saved: LocalTaskLink = {
+          id: data.id,
+          taskId: data.task_id,
+          url: data.url,
+          title: data.title,
+          addedAt: data.added_at
+        };
+        setTaskLinks((current) => [saved, ...current.filter((item) => item.id !== link.id)]);
+        await recordTaskHistory(input.taskId, "link_added", null, { url: saved.url, title: saved.title });
+      }
+    }
+  }
+
+  async function deleteTaskLink(linkId: string) {
+    if (!ensureWritable()) return;
+
+    const target = taskLinks.find((link) => link.id === linkId);
+    setTaskLinks((current) => current.filter((link) => link.id !== linkId));
+
+    if (storageMode === "supabase" && target) {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.from("task_links").delete().eq("id", linkId);
+      if (error) setSyncError(error.message);
+      else await recordTaskHistory(target.taskId, "link_removed", { url: target.url, title: target.title }, null);
+    }
+  }
+
   async function addOutcomeMetric(input: {
     metricDate: string;
     platform: string;
@@ -638,6 +739,7 @@ export function useLocalWorkspace() {
   return {
     ready,
     tasks,
+    taskLinks,
     todayTasks,
     outcomes,
     weeklyReviews,
@@ -655,6 +757,8 @@ export function useLocalWorkspace() {
     cancelTask,
     updateTaskStatus,
     updateTaskDescription,
+    addTaskLink,
+    deleteTaskLink,
     addOutcomeMetric,
     addOutcomeMetrics,
     saveWeeklySelfReview
@@ -667,4 +771,18 @@ function hasWriteAccess(subscription: LocalSubscription | null) {
   if (subscription.status !== "trialing") return false;
   if (!subscription.trialEndsAt) return true;
   return new Date(subscription.trialEndsAt).getTime() > Date.now();
+}
+
+function normalizeUrl(input: string) {
+  const trimmed = input.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function getUrlHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "链接";
+  }
 }

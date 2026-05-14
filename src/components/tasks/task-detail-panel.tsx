@@ -1,8 +1,8 @@
 "use client";
 
-import { X } from "lucide-react";
+import { ExternalLink, Link2, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { LocalTask } from "@/lib/local/tasks";
+import type { LocalTask, LocalTaskLink } from "@/lib/local/tasks";
 
 const priorityLabel = {
   high: "高优",
@@ -22,17 +22,29 @@ const statusLabel = {
 
 export function TaskDetailPanel({
   task,
+  links,
+  canWrite,
   onClose,
-  onSaveDescription
+  onSaveDescription,
+  onAddLink,
+  onDeleteLink
 }: {
   task: LocalTask | null;
+  links: LocalTaskLink[];
+  canWrite: boolean;
   onClose: () => void;
   onSaveDescription: (taskId: string, description: string) => void;
+  onAddLink: (taskId: string, url: string, title?: string) => void;
+  onDeleteLink: (linkId: string) => void;
 }) {
   const [description, setDescription] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkTitle, setLinkTitle] = useState("");
 
   useEffect(() => {
     setDescription(task?.description ?? "");
+    setLinkUrl("");
+    setLinkTitle("");
   }, [task]);
 
   if (!task) return null;
@@ -66,6 +78,7 @@ export function TaskDetailPanel({
             </label>
             <textarea
               className="min-h-[132px] w-full resize-none rounded-md border border-border-default bg-bg-default px-3 py-2 text-sm outline-none focus:border-border-focus"
+              disabled={!canWrite}
               id="task-description"
               onChange={(event) => setDescription(event.target.value)}
               placeholder="补充任务背景、链接、临时想法..."
@@ -73,11 +86,84 @@ export function TaskDetailPanel({
             />
             <div className="mt-2 flex justify-end">
               <button
-                className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse hover:bg-accent-hover"
+                className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse hover:bg-accent-hover disabled:opacity-50"
+                disabled={!canWrite}
                 onClick={() => onSaveDescription(task.id, description)}
               >
                 保存描述
               </button>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-2 text-sm font-medium">链接附件</h3>
+            <form
+              className="mb-3 grid gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!canWrite || !linkUrl.trim()) return;
+                onAddLink(task.id, linkUrl, linkTitle);
+                setLinkUrl("");
+                setLinkTitle("");
+              }}
+            >
+              <input
+                className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 text-sm outline-none focus:border-border-focus"
+                disabled={!canWrite}
+                onChange={(event) => setLinkUrl(event.target.value)}
+                placeholder="https://..."
+                value={linkUrl}
+              />
+              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                <input
+                  className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 text-sm outline-none focus:border-border-focus"
+                  disabled={!canWrite}
+                  onChange={(event) => setLinkTitle(event.target.value)}
+                  placeholder="链接标题，可选"
+                  value={linkTitle}
+                />
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse disabled:opacity-50"
+                  disabled={!canWrite || !linkUrl.trim()}
+                >
+                  <Link2 size={15} />
+                  添加
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-2">
+              {links.length === 0 ? (
+                <p className="rounded-md bg-bg-subtle px-3 py-2 text-sm text-text-muted">还没有链接。</p>
+              ) : null}
+              {links.map((link) => (
+                <div
+                  className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-md border border-border-default px-3 py-2"
+                  key={link.id}
+                >
+                  <a
+                    className="min-w-0 text-sm hover:underline"
+                    href={link.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <span className="block truncate">{link.title || link.url}</span>
+                    <span className="mt-0.5 flex items-center gap-1 truncate text-xs text-text-muted">
+                      <ExternalLink size={12} />
+                      {link.url}
+                    </span>
+                  </a>
+                  <button
+                    aria-label={`删除链接 ${link.title || link.url}`}
+                    className="rounded-md p-1 text-text-muted hover:bg-bg-hover disabled:opacity-50"
+                    disabled={!canWrite}
+                    onClick={() => onDeleteLink(link.id)}
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
             </div>
           </section>
 

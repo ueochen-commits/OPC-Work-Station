@@ -25,6 +25,7 @@ export default function TodayPage() {
   const [selectedTask, setSelectedTask] = useState<LocalTask | null>(null);
   const {
     ready,
+    taskLinks,
     todayTasks,
     settings,
     scheduledMinutes,
@@ -37,7 +38,9 @@ export default function TodayPage() {
     toggleTask,
     postponeTask,
     cancelTask,
-    updateTaskDescription
+    updateTaskDescription,
+    addTaskLink,
+    deleteTaskLink
   } = useLocalWorkspace();
 
   const capacity =
@@ -188,8 +191,13 @@ export default function TodayPage() {
       </section>
 
       <TaskDetailPanel
+        canWrite={canWrite}
+        links={selectedTask ? taskLinks.filter((link) => link.taskId === selectedTask.id) : []}
+        onAddLink={(taskId, url, title) => addTaskLink({ taskId, url, title })}
         onClose={() => setSelectedTask(null)}
+        onDeleteLink={deleteTaskLink}
         onSaveDescription={(taskId, description) => {
+          if (!canWrite) return;
           updateTaskDescription(taskId, description);
           setSelectedTask((current) =>
             current && current.id === taskId ? { ...current, description: description || null } : current

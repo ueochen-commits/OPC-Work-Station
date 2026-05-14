@@ -25,4 +25,8 @@ export interface ParseResponse {
   source: "deepseek" | "local_fallback";
   result: QuickTaskParseResult;
   warning?: string;
+  quota?: {
+    limit: number;
+    used: number;
+  } | null;
 }
