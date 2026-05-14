@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CalendarCheck, FolderKanban, Plus, Settings, Sparkles } from "lucide-react";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 
 const navItems = [
   { href: "/today", label: "今日", icon: CalendarCheck },
@@ -46,6 +47,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
+          <div className="mt-8">
+            <SignOutButton />
+          </div>
         </aside>
 
         <div className="w-full pb-16 md:pb-0">

@@ -25,6 +25,8 @@ export default function TodayPage() {
     todayTasks,
     settings,
     scheduledMinutes,
+    storageMode,
+    syncError,
     setSettings,
     addTask,
     toggleTask,
@@ -46,6 +48,16 @@ export default function TodayPage() {
         <div>
           <p className="mb-1 text-sm text-text-muted">{new Date().toLocaleDateString("zh-CN")} · 今日</p>
           <h1 className="text-[28px] font-semibold leading-tight">今日工作台</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            <span className="rounded-sm bg-bg-muted px-2 py-0.5">
+              {storageMode === "supabase" ? "已连接 Supabase" : "本地演示模式"}
+            </span>
+            {syncError ? (
+              <span className="rounded-sm bg-[var(--warning-bg)] px-2 py-0.5 text-[var(--warning-fg)]">
+                {syncError}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-2 text-sm">
           <Metric label="产能" value={capacity > 0 ? `${capacity / 60}h` : "暂停"} />

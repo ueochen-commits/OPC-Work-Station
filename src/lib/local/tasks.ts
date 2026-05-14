@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowserClient, hasSupabaseBrowserConfig } from "@/lib/supabase/client";
+import { scheduledDateTimeToIso, scheduledEndToIso, taskRowToLocalTask } from "@/lib/supabase/task-mapper";
 import type { EnergyMode, Priority, TaskStatus } from "@/types/domain";
 
 export interface LocalTask {
@@ -82,19 +84,75 @@ export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [settings, setSettings] = useState<LocalSettings>(defaultSettings);
   const [ready, setReady] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [storageMode, setStorageMode] = useState<"local" | "supabase">("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedTasks = window.localStorage.getItem(TASKS_KEY);
-    const storedSettings = window.localStorage.getItem(SETTINGS_KEY);
+    let cancelled = false;
 
-    setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
-    setSettings(storedSettings ? { ...defaultSettings, ...JSON.parse(storedSettings) } : defaultSettings);
-    setReady(true);
+    async function loadWorkspace() {
+      const storedSettings = window.localStorage.getItem(SETTINGS_KEY);
+      setSettings(storedSettings ? { ...defaultSettings, ...JSON.parse(storedSettings) } : defaultSettings);
+
+      if (!hasSupabaseBrowserConfig()) {
+        loadLocalTasks();
+        return;
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const sessionResult = await supabase.auth.getSession();
+      const user = sessionResult.data.session?.user;
+
+      if (!user) {
+        loadLocalTasks();
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("tasks")
+        .select(
+          "id,title,project_id,description,category,priority,estimated_minutes,status,scheduled_start,completed_at,created_at"
+        )
+        .eq("user_id", user.id)
+        .order("scheduled_start", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        setSyncError(error.message);
+        loadLocalTasks();
+        return;
+      }
+
+      setUserId(user.id);
+      setStorageMode("supabase");
+      setTasks((data || []).map(taskRowToLocalTask));
+      setReady(true);
+    }
+
+    function loadLocalTasks() {
+      const storedTasks = window.localStorage.getItem(TASKS_KEY);
+      setStorageMode("local");
+      setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
+      setReady(true);
+    }
+
+    loadWorkspace().catch((error) => {
+      setSyncError(error instanceof Error ? error.message : "Workspace load failed");
+      const storedTasks = window.localStorage.getItem(TASKS_KEY);
+      setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
+      setReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (ready) window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-  }, [ready, tasks]);
+    if (ready && storageMode === "local") window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+  }, [ready, storageMode, tasks]);
 
   useEffect(() => {
     if (ready) window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -112,7 +170,7 @@ export function useLocalWorkspace() {
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
 
-  function addTask(input: {
+  async function addTask(input: {
     title: string;
     project?: string;
     estimatedMinutes: number;
@@ -134,13 +192,43 @@ export function useLocalWorkspace() {
       completedAt: null
     };
     setTasks((current) => [task, ...current]);
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert({
+          user_id: userId,
+          title: input.title,
+          category: input.project || "日常运营",
+          priority: input.priority,
+          estimated_minutes: input.estimatedMinutes,
+          status: "scheduled",
+          scheduled_start: scheduledDateTimeToIso(input.scheduledDate, input.scheduledTime),
+          scheduled_end: scheduledEndToIso(input.scheduledDate, input.scheduledTime, input.estimatedMinutes)
+        })
+        .select(
+          "id,title,project_id,description,category,priority,estimated_minutes,status,scheduled_start,completed_at,created_at"
+        )
+        .single();
+
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+
+      if (data) {
+        setTasks((current) => current.map((currentTask) => (currentTask.id === task.id ? taskRowToLocalTask(data) : currentTask)));
+      }
+    }
   }
 
-  function toggleTask(taskId: string) {
+  async function toggleTask(taskId: string) {
+    const target = tasks.find((task) => task.id === taskId);
+    const completed = target?.status !== "completed";
     setTasks((current) =>
       current.map((task) => {
         if (task.id !== taskId) return task;
-        const completed = task.status !== "completed";
         return {
           ...task,
           status: completed ? "completed" : "scheduled",
@@ -148,23 +236,55 @@ export function useLocalWorkspace() {
         };
       })
     );
+
+    if (storageMode === "supabase") {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          status: completed ? "completed" : "scheduled",
+          completed_at: completed ? new Date().toISOString() : null
+        })
+        .eq("id", taskId);
+      if (error) setSyncError(error.message);
+    }
   }
 
-  function postponeTask(taskId: string) {
+  async function postponeTask(taskId: string) {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const nextDate = tomorrow.toISOString().slice(0, 10);
+    const target = tasks.find((task) => task.id === taskId);
     setTasks((current) =>
       current.map((task) =>
         task.id === taskId ? { ...task, scheduledDate: nextDate, status: "postponed" } : task
       )
     );
+
+    if (storageMode === "supabase" && target) {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          status: "postponed",
+          scheduled_start: scheduledDateTimeToIso(nextDate, target.scheduledTime),
+          scheduled_end: scheduledEndToIso(nextDate, target.scheduledTime, target.estimatedMinutes)
+        })
+        .eq("id", taskId);
+      if (error) setSyncError(error.message);
+    }
   }
 
-  function cancelTask(taskId: string) {
+  async function cancelTask(taskId: string) {
     setTasks((current) =>
       current.map((task) => (task.id === taskId ? { ...task, status: "cancelled" } : task))
     );
+
+    if (storageMode === "supabase") {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.from("tasks").update({ status: "cancelled" }).eq("id", taskId);
+      if (error) setSyncError(error.message);
+    }
   }
 
   return {
@@ -173,6 +293,8 @@ export function useLocalWorkspace() {
     todayTasks,
     settings,
     scheduledMinutes,
+    storageMode,
+    syncError,
     setSettings,
     addTask,
     toggleTask,
