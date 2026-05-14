@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, CalendarCheck, CalendarDays, FolderKanban, Plus, Settings, Sparkles } from "lucide-react";
+import { CalendarCheck, CalendarDays, FolderKanban, Plus, Settings, Sparkles } from "lucide-react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 
 const navItems = [
   { href: "/today", label: "今日", icon: CalendarCheck },
-  { href: "/plan", label: "计划", icon: Brain },
   { href: "/schedule", label: "排期", icon: CalendarDays },
   { href: "/projects", label: "项目", icon: FolderKanban },
   { href: "/retro", label: "复盘", icon: Sparkles },
@@ -59,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 grid h-14 grid-cols-6 border-t border-border-default bg-bg-default md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 grid h-14 grid-cols-5 border-t border-border-default bg-bg-default md:hidden">
         {navItems.map((item) => {
           const active = pathname === item.href;
           return (

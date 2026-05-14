@@ -4,10 +4,11 @@ import { Keyboard, Loader2, Wand2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { Priority } from "@/types/domain";
 import type { ParseResponse, QuickTaskParseResult } from "@/types/parse";
+import { looksLikeBattlePlan, parseBattlePlanDocument, type ParsedBattlePlanTask } from "@/lib/local/battle-plan";
 
 const placeholders = [
   "试试说：明天上午写个广告脚本 2 小时",
-  "试试说：下周二前给小米发脚本",
+  "也可以直接粘贴 Claude 生成的整月作战清单",
   "试试说：今天下午整理选题库 60 分钟",
   "试试说：后天复盘抖音数据",
   "试试说：周五前完成课程大纲"
@@ -15,10 +16,9 @@ const placeholders = [
 
 const chips = [
   { label: "快速任务", value: "明天上午写个" },
-  { label: "拆解目标", value: "我想年底前达到" },
-  { label: "批量导入", value: "1. " },
-  { label: "记数据", value: "抖音今天播放" },
-  { label: "改任务", value: "把" }
+  { label: "整月计划", value: "# 5 月作战清单\n\n## 5 月 14 日(周四)\n- [ ] " },
+  { label: "计划变更", value: "把新学到的商业模式安排到接下来 7 天：" },
+  { label: "记数据", value: "抖音今天播放" }
 ];
 
 export function SmartInputBox({
@@ -37,10 +37,12 @@ export function SmartInputBox({
     priority: Priority;
     scheduledDate: string;
     scheduledTime: string;
-  }) => void;
+  }) => void | Promise<void>;
 }) {
   const [input, setInput] = useState("");
   const [parsed, setParsed] = useState<QuickTaskParseResult | null>(null);
+  const [bulkTasks, setBulkTasks] = useState<ParsedBattlePlanTask[]>([]);
+  const [bulkProject, setBulkProject] = useState<string | null>(null);
   const [parseSource, setParseSource] = useState<ParseResponse["source"] | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -51,8 +53,22 @@ export function SmartInputBox({
     if (disabled) return;
     setSubmitting(true);
     setWarning(null);
+    setBulkTasks([]);
+    setBulkProject(null);
 
     try {
+      if (looksLikeBattlePlan(input)) {
+        const parsedPlan = parseBattlePlanDocument(input);
+        if (parsedPlan.tasks.length === 0) {
+          setWarning("没有识别到可导入的未完成任务。可以打开已完成任务开关的导入页，或检查日期标题格式。");
+          return;
+        }
+        setBulkProject(parsedPlan.project);
+        setBulkTasks(parsedPlan.tasks);
+        setParseSource("local_fallback");
+        return;
+      }
+
       const response = await fetch("/api/parse", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -83,6 +99,17 @@ export function SmartInputBox({
     setParsed(null);
   }
 
+  async function createBulk() {
+    if (disabled || bulkTasks.length === 0) return;
+    for (const task of bulkTasks) {
+      await onCreate(task);
+    }
+    setInput("");
+    setBulkTasks([]);
+    setBulkProject(null);
+    setWarning(null);
+  }
+
   return (
     <section className="rounded-lg border border-border-default bg-bg-default">
       <div className="flex items-center gap-2 px-4 pt-3 text-xs text-text-muted">
@@ -101,12 +128,14 @@ export function SmartInputBox({
           onChange={(event) => {
             setInput(event.target.value);
             setParsed(null);
+            setBulkTasks([]);
+            setBulkProject(null);
             setWarning(null);
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              parsed ? create() : parse();
+              parsed ? create() : bulkTasks.length > 0 ? createBulk() : parse();
             }
           }}
           placeholder={placeholder}
@@ -157,6 +186,45 @@ export function SmartInputBox({
                 onClick={create}
               >
                 确认创建
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {bulkTasks.length > 0 ? (
+          <div className="mt-3 rounded-md border border-border-default bg-bg-subtle p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">识别到 {bulkTasks.length} 个未完成任务</div>
+              <span className="rounded-sm bg-bg-muted px-2 py-0.5 text-xs text-text-muted">
+                {bulkProject || "导入计划"}
+              </span>
+            </div>
+            <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
+              {bulkTasks.slice(0, 20).map((task, index) => (
+                <div className="rounded-md border border-border-default bg-bg-default px-3 py-2 text-sm" key={`${task.scheduledDate}-${task.title}-${index}`}>
+                  <div className="line-clamp-1 font-medium">{task.title}</div>
+                  <div className="mt-0.5 text-xs text-text-muted">
+                    {task.scheduledDate} {task.scheduledTime} · {task.estimatedMinutes} 分钟
+                  </div>
+                </div>
+              ))}
+              {bulkTasks.length > 20 ? (
+                <p className="text-xs text-text-muted">还有 {bulkTasks.length - 20} 个任务未显示。</p>
+              ) : null}
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                className="h-8 rounded-md border border-border-default px-3 text-sm hover:bg-bg-hover"
+                onClick={() => setBulkTasks([])}
+              >
+                取消
+              </button>
+              <button
+                className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse"
+                disabled={disabled}
+                onClick={createBulk}
+              >
+                确认导入
               </button>
             </div>
           </div>
