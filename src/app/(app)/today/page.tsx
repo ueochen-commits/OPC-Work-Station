@@ -6,7 +6,7 @@ import { TaskComposer } from "@/components/tasks/task-composer";
 import { TaskDetailPanel } from "@/components/tasks/task-detail-panel";
 import { type LocalTask, useLocalWorkspace } from "@/lib/local/tasks";
 import type { EnergyMode } from "@/types/domain";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const priorityLabel = {
   high: "高优",
@@ -26,6 +26,7 @@ export default function TodayPage() {
   const {
     ready,
     taskLinks,
+    moodNotes,
     todayTasks,
     settings,
     scheduledMinutes,
@@ -40,8 +41,20 @@ export default function TodayPage() {
     cancelTask,
     updateTaskDescription,
     addTaskLink,
-    deleteTaskLink
+    deleteTaskLink,
+    saveDailyMoodNote
   } = useLocalWorkspace();
+  const noteDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const currentMoodNote = useMemo(
+    () => moodNotes.find((note) => note.noteDate === noteDate),
+    [moodNotes, noteDate]
+  );
+  const [moodNote, setMoodNote] = useState("");
+  const [moodMessage, setMoodMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMoodNote(currentMoodNote?.moodNote || "");
+  }, [currentMoodNote]);
 
   const capacity =
     settings.energyMode === "light"
@@ -84,13 +97,55 @@ export default function TodayPage() {
                 ? "border-border-strong bg-bg-active text-text-default"
                 : "border-border-default text-text-muted hover:bg-bg-hover"
             ].join(" ")}
+            disabled={!canWrite}
             key={mode}
-            onClick={() => setSettings((current) => ({ ...current, energyMode: mode }))}
+            onClick={() => {
+              setSettings((current) => ({ ...current, energyMode: mode }));
+              setMoodMessage(null);
+            }}
           >
             {modeLabel[mode]}
           </button>
         ))}
       </section>
+
+      {settings.energyMode !== "normal" || currentMoodNote ? (
+        <section className="mb-4 rounded-lg border border-border-default bg-bg-subtle p-4">
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium">今日状态备注</h2>
+              <p className="mt-1 text-xs text-text-muted">轻日和暂停日会进入复盘上下文，方便后续解释产能变化。</p>
+            </div>
+            {moodMessage ? <span className="text-xs text-text-muted">{moodMessage}</span> : null}
+          </div>
+          <textarea
+            className="min-h-[76px] w-full resize-none rounded-md border border-border-default bg-bg-default px-3 py-2 text-sm outline-none focus:border-border-focus"
+            disabled={!canWrite}
+            onChange={(event) => {
+              setMoodNote(event.target.value);
+              setMoodMessage(null);
+            }}
+            placeholder="例如：今天睡眠不足，只保留必须交付。"
+            value={moodNote}
+          />
+          <div className="mt-2 flex justify-end">
+            <button
+              className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse disabled:opacity-50"
+              disabled={!canWrite}
+              onClick={async () => {
+                await saveDailyMoodNote({
+                  noteDate,
+                  energyMode: settings.energyMode,
+                  moodNote
+                });
+                setMoodMessage("已保存");
+              }}
+            >
+              保存状态
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {load >= 90 && settings.energyMode !== "paused" ? (
         <div className="mb-4 rounded-lg border border-border-default bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-fg)]">

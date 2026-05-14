@@ -28,6 +28,14 @@ export interface LocalTaskLink {
   addedAt: string;
 }
 
+export interface LocalDailyMoodNote {
+  id: string;
+  noteDate: string;
+  energyMode: EnergyMode;
+  moodNote: string | null;
+  createdAt: string;
+}
+
 export interface LocalSettings {
   dailyCapacityMinutes: number;
   energyMode: EnergyMode;
@@ -63,6 +71,7 @@ export interface LocalSubscription {
 
 const TASKS_KEY = "opc.local.tasks";
 const TASK_LINKS_KEY = "opc.local.task-links";
+const MOOD_NOTES_KEY = "opc.local.mood-notes";
 const SETTINGS_KEY = "opc.local.settings";
 const OUTCOMES_KEY = "opc.local.outcomes";
 const WEEKLY_REVIEWS_KEY = "opc.local.weekly-reviews";
@@ -124,6 +133,7 @@ const starterTasks: LocalTask[] = [
 export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [taskLinks, setTaskLinks] = useState<LocalTaskLink[]>([]);
+  const [moodNotes, setMoodNotes] = useState<LocalDailyMoodNote[]>([]);
   const [outcomes, setOutcomes] = useState<LocalOutcomeMetric[]>([]);
   const [weeklyReviews, setWeeklyReviews] = useState<LocalWeeklySelfReview[]>([]);
   const [subscription, setSubscription] = useState<LocalSubscription | null>(null);
@@ -143,6 +153,7 @@ export function useLocalWorkspace() {
       if (!hasSupabaseBrowserConfig()) {
         loadLocalTasks();
         loadLocalTaskLinks();
+        loadLocalMoodNotes();
         loadLocalOutcomes();
         loadLocalWeeklyReviews();
         return;
@@ -155,6 +166,7 @@ export function useLocalWorkspace() {
       if (!user) {
         loadLocalTasks();
         loadLocalTaskLinks();
+        loadLocalMoodNotes();
         loadLocalOutcomes();
         loadLocalWeeklyReviews();
         return;
@@ -174,9 +186,18 @@ export function useLocalWorkspace() {
         setSyncError(error.message);
         loadLocalTasks();
         loadLocalTaskLinks();
+        loadLocalMoodNotes();
         loadLocalOutcomes();
         return;
       }
+
+      const { data: moodData, error: moodError } = await supabase
+        .from("daily_mood_notes")
+        .select("id,note_date,energy_mode,mood_note,created_at")
+        .eq("user_id", user.id)
+        .order("note_date", { ascending: false });
+
+      if (moodError) setSyncError(moodError.message);
 
       const { data: linkData, error: linkError } = await supabase
         .from("task_links")
@@ -213,6 +234,15 @@ export function useLocalWorkspace() {
       setUserId(user.id);
       setStorageMode("supabase");
       setTasks((data || []).map(taskRowToLocalTask));
+      setMoodNotes(
+        (moodData || []).map((row) => ({
+          id: row.id,
+          noteDate: row.note_date,
+          energyMode: row.energy_mode,
+          moodNote: row.mood_note,
+          createdAt: row.created_at
+        }))
+      );
       setTaskLinks(
         (linkData || []).map((row) => ({
           id: row.id,
@@ -268,6 +298,11 @@ export function useLocalWorkspace() {
       setTaskLinks(storedLinks ? (JSON.parse(storedLinks) as LocalTaskLink[]) : []);
     }
 
+    function loadLocalMoodNotes() {
+      const storedNotes = window.localStorage.getItem(MOOD_NOTES_KEY);
+      setMoodNotes(storedNotes ? (JSON.parse(storedNotes) as LocalDailyMoodNote[]) : []);
+    }
+
     function loadLocalOutcomes() {
       const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
@@ -282,10 +317,12 @@ export function useLocalWorkspace() {
       setSyncError(error instanceof Error ? error.message : "Workspace load failed");
       const storedTasks = window.localStorage.getItem(TASKS_KEY);
       const storedLinks = window.localStorage.getItem(TASK_LINKS_KEY);
+      const storedMoodNotes = window.localStorage.getItem(MOOD_NOTES_KEY);
       const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
       const storedReviews = window.localStorage.getItem(WEEKLY_REVIEWS_KEY);
       setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
       setTaskLinks(storedLinks ? (JSON.parse(storedLinks) as LocalTaskLink[]) : []);
+      setMoodNotes(storedMoodNotes ? (JSON.parse(storedMoodNotes) as LocalDailyMoodNote[]) : []);
       setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
       setWeeklyReviews(storedReviews ? (JSON.parse(storedReviews) as LocalWeeklySelfReview[]) : []);
       setReady(true);
@@ -303,6 +340,10 @@ export function useLocalWorkspace() {
   useEffect(() => {
     if (ready && storageMode === "local") window.localStorage.setItem(TASK_LINKS_KEY, JSON.stringify(taskLinks));
   }, [ready, storageMode, taskLinks]);
+
+  useEffect(() => {
+    if (ready && storageMode === "local") window.localStorage.setItem(MOOD_NOTES_KEY, JSON.stringify(moodNotes));
+  }, [ready, storageMode, moodNotes]);
 
   useEffect(() => {
     if (ready && storageMode === "local") window.localStorage.setItem(OUTCOMES_KEY, JSON.stringify(outcomes));
@@ -579,6 +620,57 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function saveDailyMoodNote(input: {
+    noteDate: string;
+    energyMode: EnergyMode;
+    moodNote: string;
+  }) {
+    if (!ensureWritable()) return;
+
+    const note: LocalDailyMoodNote = {
+      id: crypto.randomUUID(),
+      noteDate: input.noteDate,
+      energyMode: input.energyMode,
+      moodNote: input.moodNote || null,
+      createdAt: new Date().toISOString()
+    };
+
+    setMoodNotes((current) => [note, ...current.filter((item) => item.noteDate !== input.noteDate)]);
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("daily_mood_notes")
+        .upsert(
+          {
+            user_id: userId,
+            note_date: input.noteDate,
+            energy_mode: input.energyMode,
+            mood_note: input.moodNote || null
+          },
+          { onConflict: "user_id,note_date" }
+        )
+        .select("id,note_date,energy_mode,mood_note,created_at")
+        .single();
+
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+
+      if (data) {
+        const saved: LocalDailyMoodNote = {
+          id: data.id,
+          noteDate: data.note_date,
+          energyMode: data.energy_mode,
+          moodNote: data.mood_note,
+          createdAt: data.created_at
+        };
+        setMoodNotes((current) => [saved, ...current.filter((item) => item.noteDate !== saved.noteDate)]);
+      }
+    }
+  }
+
   async function addOutcomeMetric(input: {
     metricDate: string;
     platform: string;
@@ -740,6 +832,7 @@ export function useLocalWorkspace() {
     ready,
     tasks,
     taskLinks,
+    moodNotes,
     todayTasks,
     outcomes,
     weeklyReviews,
@@ -759,6 +852,7 @@ export function useLocalWorkspace() {
     updateTaskDescription,
     addTaskLink,
     deleteTaskLink,
+    saveDailyMoodNote,
     addOutcomeMetric,
     addOutcomeMetrics,
     saveWeeklySelfReview
