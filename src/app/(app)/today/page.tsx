@@ -26,6 +26,7 @@ export default function TodayPage() {
   const {
     ready,
     taskLinks,
+    taskHistory,
     moodNotes,
     todayTasks,
     settings,
@@ -247,6 +248,7 @@ export default function TodayPage() {
 
       <TaskDetailPanel
         canWrite={canWrite}
+        history={selectedTask ? taskHistory.filter((entry) => entry.taskId === selectedTask.id) : []}
         links={selectedTask ? taskLinks.filter((link) => link.taskId === selectedTask.id) : []}
         onAddLink={(taskId, url, title) => addTaskLink({ taskId, url, title })}
         onClose={() => setSelectedTask(null)}

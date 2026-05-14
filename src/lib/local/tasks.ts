@@ -28,6 +28,16 @@ export interface LocalTaskLink {
   addedAt: string;
 }
 
+export interface LocalTaskHistoryEntry {
+  id: string;
+  taskId: string;
+  eventType: string;
+  beforeValue: unknown;
+  afterValue: unknown;
+  triggeredBy: "user" | "system" | "ai_cascade";
+  createdAt: string;
+}
+
 export interface LocalDailyMoodNote {
   id: string;
   noteDate: string;
@@ -133,6 +143,7 @@ const starterTasks: LocalTask[] = [
 export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [taskLinks, setTaskLinks] = useState<LocalTaskLink[]>([]);
+  const [taskHistory, setTaskHistory] = useState<LocalTaskHistoryEntry[]>([]);
   const [moodNotes, setMoodNotes] = useState<LocalDailyMoodNote[]>([]);
   const [outcomes, setOutcomes] = useState<LocalOutcomeMetric[]>([]);
   const [weeklyReviews, setWeeklyReviews] = useState<LocalWeeklySelfReview[]>([]);
@@ -199,6 +210,15 @@ export function useLocalWorkspace() {
 
       if (moodError) setSyncError(moodError.message);
 
+      const { data: historyData, error: historyError } = await supabase
+        .from("task_history")
+        .select("id,task_id,event_type,before_value,after_value,triggered_by,created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      if (historyError) setSyncError(historyError.message);
+
       const { data: linkData, error: linkError } = await supabase
         .from("task_links")
         .select("id,task_id,url,title,added_at")
@@ -234,6 +254,17 @@ export function useLocalWorkspace() {
       setUserId(user.id);
       setStorageMode("supabase");
       setTasks((data || []).map(taskRowToLocalTask));
+      setTaskHistory(
+        (historyData || []).map((row) => ({
+          id: row.id,
+          taskId: row.task_id,
+          eventType: row.event_type,
+          beforeValue: row.before_value,
+          afterValue: row.after_value,
+          triggeredBy: normalizeHistoryActor(row.triggered_by),
+          createdAt: row.created_at
+        }))
+      );
       setMoodNotes(
         (moodData || []).map((row) => ({
           id: row.id,
@@ -816,22 +847,39 @@ export function useLocalWorkspace() {
     if (storageMode !== "supabase" || !userId) return;
 
     const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.from("task_history").insert({
-      task_id: taskId,
-      user_id: userId,
-      event_type: eventType,
-      before_value: beforeValue === undefined ? null : beforeValue,
-      after_value: afterValue === undefined ? null : afterValue,
-      triggered_by: "user"
-    });
+    const { data, error } = await supabase
+      .from("task_history")
+      .insert({
+        task_id: taskId,
+        user_id: userId,
+        event_type: eventType,
+        before_value: beforeValue === undefined ? null : beforeValue,
+        after_value: afterValue === undefined ? null : afterValue,
+        triggered_by: "user"
+      })
+      .select("id,task_id,event_type,before_value,after_value,triggered_by,created_at")
+      .single();
 
     if (error) setSyncError(error.message);
+    if (data) {
+      const entry: LocalTaskHistoryEntry = {
+        id: data.id,
+        taskId: data.task_id,
+        eventType: data.event_type,
+        beforeValue: data.before_value,
+        afterValue: data.after_value,
+        triggeredBy: normalizeHistoryActor(data.triggered_by),
+        createdAt: data.created_at
+      };
+      setTaskHistory((current) => [entry, ...current.filter((item) => item.id !== entry.id)]);
+    }
   }
 
   return {
     ready,
     tasks,
     taskLinks,
+    taskHistory,
     moodNotes,
     todayTasks,
     outcomes,
@@ -879,4 +927,9 @@ function getUrlHost(url: string) {
   } catch {
     return "链接";
   }
+}
+
+function normalizeHistoryActor(value: string): LocalTaskHistoryEntry["triggeredBy"] {
+  if (value === "system" || value === "ai_cascade") return value;
+  return "user";
 }

@@ -2,7 +2,7 @@
 
 import { ExternalLink, Link2, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { LocalTask, LocalTaskLink } from "@/lib/local/tasks";
+import type { LocalTask, LocalTaskHistoryEntry, LocalTaskLink } from "@/lib/local/tasks";
 
 const priorityLabel = {
   high: "高优",
@@ -23,6 +23,7 @@ const statusLabel = {
 export function TaskDetailPanel({
   task,
   links,
+  history,
   canWrite,
   onClose,
   onSaveDescription,
@@ -31,6 +32,7 @@ export function TaskDetailPanel({
 }: {
   task: LocalTask | null;
   links: LocalTaskLink[];
+  history: LocalTaskHistoryEntry[];
   canWrite: boolean;
   onClose: () => void;
   onSaveDescription: (taskId: string, description: string) => void;
@@ -170,12 +172,24 @@ export function TaskDetailPanel({
           <section>
             <h3 className="mb-2 text-sm font-medium">任务历史</h3>
             <div className="space-y-2 text-sm text-text-muted">
-              <HistoryLine label="创建任务" value={new Date(task.createdAt).toLocaleString("zh-CN")} />
-              {task.completedAt ? (
-                <HistoryLine label="完成任务" value={new Date(task.completedAt).toLocaleString("zh-CN")} />
-              ) : null}
-              {task.status === "postponed" ? <HistoryLine label="顺延任务" value="已移动到后续日期" /> : null}
-              {task.status === "cancelled" ? <HistoryLine label="取消任务" value="任务已取消" /> : null}
+              {history.length > 0
+                ? history.map((entry) => (
+                    <HistoryLine
+                      key={entry.id}
+                      label={historyLabel(entry.eventType)}
+                      value={formatHistoryValue(entry)}
+                    />
+                  ))
+                : (
+                    <>
+                      <HistoryLine label="创建任务" value={new Date(task.createdAt).toLocaleString("zh-CN")} />
+                      {task.completedAt ? (
+                        <HistoryLine label="完成任务" value={new Date(task.completedAt).toLocaleString("zh-CN")} />
+                      ) : null}
+                      {task.status === "postponed" ? <HistoryLine label="顺延任务" value="已移动到后续日期" /> : null}
+                      {task.status === "cancelled" ? <HistoryLine label="取消任务" value="任务已取消" /> : null}
+                    </>
+                  )}
             </div>
           </section>
         </div>
@@ -200,4 +214,53 @@ function HistoryLine({ label, value }: { label: string; value: string }) {
       <span>{value}</span>
     </div>
   );
+}
+
+function historyLabel(eventType: string) {
+  const labels: Record<string, string> = {
+    created: "创建任务",
+    title_changed: "修改标题",
+    rescheduled: "调整状态",
+    priority_changed: "调整优先级",
+    postponed: "顺延任务",
+    completed: "完成任务",
+    reopened: "重新打开",
+    cancelled: "取消任务",
+    description_changed: "更新描述",
+    link_added: "添加链接",
+    link_removed: "删除链接",
+    note_added: "添加备注"
+  };
+  return labels[eventType] || eventType;
+}
+
+function formatHistoryValue(entry: LocalTaskHistoryEntry) {
+  const date = new Date(entry.createdAt).toLocaleString("zh-CN");
+  const detail = historyDetail(entry);
+  return detail ? `${date} · ${detail}` : date;
+}
+
+function historyDetail(entry: LocalTaskHistoryEntry) {
+  if (entry.eventType === "postponed" && typeof entry.afterValue === "string") {
+    return `移至 ${entry.afterValue}`;
+  }
+  if (entry.eventType === "completed") return "已完成";
+  if (entry.eventType === "reopened") return "重新排程";
+  if (entry.eventType === "cancelled") return "已取消";
+  if (entry.eventType === "description_changed") return "描述已保存";
+  if (entry.eventType === "link_added") return objectTitle(entry.afterValue) || "链接已添加";
+  if (entry.eventType === "link_removed") return objectTitle(entry.beforeValue) || "链接已删除";
+  if (entry.eventType === "created") return objectTitle(entry.afterValue) || "已创建";
+  if (entry.eventType === "rescheduled" && typeof entry.afterValue === "string") return entry.afterValue;
+  return null;
+}
+
+function objectTitle(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const title = record.title;
+  const url = record.url;
+  if (typeof title === "string" && title) return title;
+  if (typeof url === "string" && url) return url;
+  return null;
 }
