@@ -1,6 +1,7 @@
 "use client";
 
 import { useLocalWorkspace } from "@/lib/local/tasks";
+import { SubscriptionPanel } from "@/components/subscription/subscription-panel";
 
 export default function SettingsPage() {
   const { settings, setSettings } = useLocalWorkspace();
@@ -54,12 +55,7 @@ export default function SettingsPage() {
         </label>
       </section>
 
-      <section className="mt-5 max-w-[640px] rounded-lg border border-border-default bg-bg-subtle p-4">
-        <h2 className="mb-1 text-sm font-medium">订阅</h2>
-        <p className="text-sm text-text-muted">
-          XORPAY 接入后，这里会展示 14 天试用、基础版 / 专业版、续费提醒和支付订单状态。
-        </p>
-      </section>
+      <SubscriptionPanel />
     </div>
   );
 }
