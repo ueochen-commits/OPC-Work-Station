@@ -10,16 +10,15 @@ export interface ParsedBattlePlanTask {
   completed?: boolean;
 }
 
-const today = new Date().toISOString().slice(0, 10);
-
 export function parseBattlePlanDocument(
   input: string,
-  options: { includeCompleted?: boolean; projectName?: string } = {}
+  options: { includeCompleted?: boolean; projectName?: string; baseDate?: Date } = {}
 ) {
-  const now = new Date();
-  let currentDate = today;
+  const now = options.baseDate || new Date();
+  let currentDate = toDateInput(now);
   let hasDailyDate = false;
-  const project = options.projectName || inferProjectName(input);
+  const fallbackProject = options.projectName || inferProjectName(input);
+  let currentBlock: { start: string; end: string; title: string; project: string; taskIndex: number } | null = null;
   const tasks: ParsedBattlePlanTask[] = [];
 
   for (const rawLine of input.split(/\r?\n/)) {
@@ -30,29 +29,46 @@ export function parseBattlePlanDocument(
     if (headingDate) {
       currentDate = headingDate;
       hasDailyDate = true;
+      currentBlock = null;
       continue;
     }
 
     if (!hasDailyDate) continue;
+
+    const timeBlock = parseTimeBlockHeading(line);
+    if (timeBlock) {
+      currentBlock = {
+        ...timeBlock,
+        project: inferProjectFromText(timeBlock.title) || fallbackProject,
+        taskIndex: 0
+      };
+      continue;
+    }
 
     const parsedLine = normalizeTaskLine(line);
     if (!parsedLine) continue;
     if (!options.includeCompleted && parsedLine.completed) continue;
     if (isLikelyHeading(parsedLine.title)) continue;
 
+    const scheduledTime = currentBlock
+      ? addMinutesToTime(currentBlock.start, currentBlock.taskIndex * 45)
+      : inferTime(parsedLine.title, tasks.filter((task) => task.scheduledDate === currentDate).length);
+    const estimatedMinutes = inferMinutes(parsedLine.title, currentBlock);
+
     tasks.push({
       title: parsedLine.title,
-      project,
-      estimatedMinutes: inferMinutes(parsedLine.title),
+      project: inferProjectFromText(parsedLine.title) || currentBlock?.project || fallbackProject,
+      estimatedMinutes,
       priority: inferPriority(parsedLine.title),
       scheduledDate: currentDate,
-      scheduledTime: inferTime(parsedLine.title, tasks.filter((task) => task.scheduledDate === currentDate).length),
+      scheduledTime,
       completed: parsedLine.completed
     });
+    if (currentBlock) currentBlock.taskIndex += 1;
   }
 
   return {
-    project,
+    project: fallbackProject,
     tasks: tasks.slice(0, 300)
   };
 }
@@ -76,12 +92,44 @@ function inferProjectName(input: string) {
 
 function parseDateHeading(line: string, now: Date) {
   const normalized = line.replace(/\s+/g, " ");
-  const fullDate = normalized.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
+  const fullDate = normalized.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?/);
   if (fullDate) return toDateInput(new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3])));
 
-  const monthDay = normalized.match(/(?:^|[#\s🗓️📅—-])(\d{1,2})\s*(?:月|\/)\s*(\d{1,2})\s*[日号]?/);
+  const slashDate = normalized.match(/(20\d{2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})/);
+  if (slashDate) return toDateInput(new Date(Number(slashDate[1]), Number(slashDate[2]) - 1, Number(slashDate[3])));
+
+  const monthDay = normalized.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/);
   if (monthDay) return toDateInput(new Date(now.getFullYear(), Number(monthDay[1]) - 1, Number(monthDay[2])));
 
+  const slashMonthDay = normalized.match(/(?:^|[#\s🗓️📅—-])(\d{1,2})\/(\d{1,2})(?:\D|$)/);
+  if (slashMonthDay) return toDateInput(new Date(now.getFullYear(), Number(slashMonthDay[1]) - 1, Number(slashMonthDay[2])));
+
+  return null;
+}
+
+function parseTimeBlockHeading(line: string) {
+  const normalized = cleanupTaskTitle(line.replace(/^#{1,6}\s*/, ""));
+  const match = normalized.match(/(\d{1,2})[:：](\d{2})\s*(?:-|—|–|~|到)\s*(\d{1,2})[:：](\d{2})\s*(.*)$/);
+  if (!match) return null;
+
+  const start = `${match[1].padStart(2, "0")}:${match[2]}`;
+  const end = `${match[3].padStart(2, "0")}:${match[4]}`;
+  const title = cleanupTaskTitle(match[5] || "时间块");
+  return { start, end, title };
+}
+
+function inferProjectFromText(text: string) {
+  if (/港股|美股|早交易|盘前|挂单|自营盈利/i.test(text)) return "交易";
+  if (/TradeGrail|交易日志|记录交易|交易品种|交易所|R-Multiple|心态风控|AI 智能复盘/i.test(text)) return "TradeGrail";
+  if (/交易/i.test(text)) return "交易";
+  if (/lurenclass|录播课|课程/i.test(text)) return "lurenclass 录播课";
+  if (/社区|小程序|内测群/.test(text)) return "付费社区";
+  if (/公众号|文章|W\d|深度文/.test(text)) return "公众号内容";
+  if (/自媒体|视频|V\d|拍摄|剪辑|发布/.test(text)) return "自媒体视频";
+  if (/BIP|朋友圈|即刻|微博|小红书|抖音|B 站|B站/.test(text)) return "内容分发";
+  if (/北弧|广告|商单/.test(text)) return "品牌合作";
+  if (/助理|招聘|面试/.test(text)) return "组织建设";
+  if (/复盘|思考/.test(text)) return "复盘";
   return null;
 }
 
@@ -124,11 +172,12 @@ function cleanupTaskTitle(title: string) {
     .trim();
 }
 
-function inferMinutes(title: string) {
+function inferMinutes(title: string, currentBlock?: { start: string; end: string } | null) {
   const hour = title.match(/(\d+(?:\.\d+)?)\s*(小时|h)/i);
   if (hour) return Math.round(Number(hour[1]) * 60);
   const minute = title.match(/(\d+)\s*(分钟|分|min)/i);
   if (minute) return Number(minute[1]);
+  if (currentBlock) return Math.min(90, Math.max(30, Math.round(timeRangeMinutes(currentBlock.start, currentBlock.end) / 3)));
   if (/剪辑|课件|方案|脚本/.test(title)) return 120;
   if (/拍摄|录制/.test(title)) return 90;
   if (/发布|回复|检查|记录/.test(title)) return 30;
@@ -145,6 +194,18 @@ function inferTime(title: string, indexOfDay: number) {
   if (/下午|拍摄/.test(title)) return "14:00";
   const hour = Math.min(18, 9 + indexOfDay * 2);
   return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function timeRangeMinutes(start: string, end: string) {
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  return Math.max(30, endHour * 60 + endMinute - (startHour * 60 + startMinute));
+}
+
+function addMinutesToTime(time: string, minutes: number) {
+  const [hour, minute] = time.split(":").map(Number);
+  const total = Math.min(23 * 60 + 30, hour * 60 + minute + minutes);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function toDateInput(date: Date) {

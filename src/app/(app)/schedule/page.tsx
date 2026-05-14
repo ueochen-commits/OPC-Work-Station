@@ -27,6 +27,7 @@ export default function SchedulePage() {
   const today = useMemo(() => toDateInput(new Date()), []);
   const days = useMemo(() => buildDays(today, 30), [today]);
   const weekDays = days.slice(0, 7);
+  const hours = useMemo(() => Array.from({ length: 19 }, (_, index) => index + 5), []);
 
   const activeTasks = useMemo(
     () =>
@@ -89,7 +90,7 @@ export default function SchedulePage() {
       <section className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-sm font-medium">日历视图</h2>
-          <p className="mt-1 text-xs text-text-muted">先展示最近 7 天，下面是 30 天项目时间线。</p>
+          <p className="mt-1 text-xs text-text-muted">周视图按时间段展示任务，下面是 30 天项目时间线。</p>
         </div>
         <label>
           <span className="mb-1 block text-xs font-medium text-text-muted">项目筛选</span>
@@ -105,26 +106,33 @@ export default function SchedulePage() {
         </label>
       </section>
 
-      <section className="grid gap-2 md:grid-cols-7">
-        {weekDays.map((day) => {
-          const dayTasks = tasksByDay.get(day.date) || [];
-          return (
-            <article className="min-h-[180px] rounded-lg border border-border-default p-3" key={day.date}>
-              <div className="mb-3">
+      <section className="overflow-x-auto rounded-lg border border-border-default">
+        <div className="min-w-[920px]">
+          <div className="grid grid-cols-[72px_repeat(7,1fr)] border-b border-border-default bg-bg-subtle">
+            <div className="px-3 py-2 text-xs text-text-muted">时间</div>
+            {weekDays.map((day) => (
+              <div className="border-l border-border-default px-3 py-2" key={day.date}>
                 <div className="text-xs text-text-muted">{day.weekday}</div>
                 <div className="text-sm font-medium">{day.label}</div>
               </div>
-              <div className="space-y-2">
-                {dayTasks.slice(0, 5).map((task) => (
-                  <TaskPill key={task.id} task={task} />
-                ))}
-                {dayTasks.length > 5 ? (
-                  <div className="text-xs text-text-muted">还有 {dayTasks.length - 5} 件</div>
-                ) : null}
-              </div>
-            </article>
-          );
-        })}
+            ))}
+          </div>
+          {hours.map((hour) => (
+            <div className="grid min-h-[74px] grid-cols-[72px_repeat(7,1fr)] border-b border-border-default last:border-b-0" key={hour}>
+              <div className="px-3 py-2 text-xs text-text-muted">{String(hour).padStart(2, "0")}:00</div>
+              {weekDays.map((day) => {
+                const hourTasks = (tasksByDay.get(day.date) || []).filter((task) => Number(task.scheduledTime.slice(0, 2)) === hour);
+                return (
+                  <div className="space-y-1 border-l border-border-default px-1.5 py-1.5" key={`${day.date}-${hour}`}>
+                    {hourTasks.map((task) => (
+                      <TaskPill key={task.id} task={task} />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="mt-6 rounded-lg border border-border-default p-4">
@@ -215,9 +223,17 @@ function TaskPill({ task }: { task: LocalTask }) {
       title={task.title}
     >
       <div className="truncate font-medium">{task.title}</div>
-      <div className="mt-0.5 text-text-muted">{task.scheduledTime} · {task.estimatedMinutes}m</div>
+      <div className="mt-0.5 text-text-muted">
+        {task.scheduledTime}-{addMinutesToTime(task.scheduledTime, task.estimatedMinutes)} · {task.project || "未归属"}
+      </div>
     </div>
   );
+}
+
+function addMinutesToTime(time: string, minutes: number) {
+  const [hour, minute] = time.split(":").map(Number);
+  const total = Math.min(23 * 60 + 59, hour * 60 + minute + minutes);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function buildDays(startDate: string, count: number) {

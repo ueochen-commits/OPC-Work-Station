@@ -14,13 +14,6 @@ const placeholders = [
   "试试说：周五前完成课程大纲"
 ];
 
-const chips = [
-  { label: "快速任务", value: "明天上午写个" },
-  { label: "整月计划", value: "# 5 月作战清单\n\n## 5 月 14 日(周四)\n- [ ] " },
-  { label: "计划变更", value: "把新学到的商业模式安排到接下来 7 天：" },
-  { label: "记数据", value: "抖音今天播放" }
-];
-
 export function SmartInputBox({
   existingTaskCount,
   showReasoning,
@@ -60,7 +53,7 @@ export function SmartInputBox({
       if (looksLikeBattlePlan(input)) {
         const parsedPlan = parseBattlePlanDocument(input);
         if (parsedPlan.tasks.length === 0) {
-          setWarning("没有识别到可导入的未完成任务。可以打开已完成任务开关的导入页，或检查日期标题格式。");
+          setWarning("没有识别到可导入的未完成任务。可以检查日期标题、时间段标题，或确认清单里有未完成的 - [ ] 任务。");
           return;
         }
         setBulkProject(parsedPlan.project);
@@ -142,21 +135,6 @@ export function SmartInputBox({
           value={input}
         />
 
-        {!input ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {chips.map((chip) => (
-              <button
-                className="h-7 rounded-md bg-bg-muted px-2.5 text-xs text-text-muted hover:bg-bg-hover"
-                disabled={disabled}
-                key={chip.label}
-                onClick={() => setInput(chip.value)}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
         {parsed ? (
           <div className="mt-3 rounded-md border border-border-default bg-bg-subtle p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -204,7 +182,7 @@ export function SmartInputBox({
                 <div className="rounded-md border border-border-default bg-bg-default px-3 py-2 text-sm" key={`${task.scheduledDate}-${task.title}-${index}`}>
                   <div className="line-clamp-1 font-medium">{task.title}</div>
                   <div className="mt-0.5 text-xs text-text-muted">
-                    {task.scheduledDate} {task.scheduledTime} · {task.estimatedMinutes} 分钟
+                    {task.scheduledDate} {task.scheduledTime} · {task.project || "未归属"} · {task.estimatedMinutes} 分钟
                   </div>
                 </div>
               ))}
