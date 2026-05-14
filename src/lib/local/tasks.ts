@@ -296,6 +296,37 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function updateTaskStatus(taskId: string, status: TaskStatus) {
+    const target = tasks.find((task) => task.id === taskId);
+    const completedAt = status === "completed" ? new Date().toISOString() : null;
+
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              status,
+              completedAt
+            }
+          : task
+      )
+    );
+
+    if (storageMode === "supabase") {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          status,
+          completed_at: completedAt
+        })
+        .eq("id", taskId);
+
+      if (error) setSyncError(error.message);
+      else await recordTaskHistory(taskId, status === "completed" ? "completed" : "rescheduled", target?.status, status);
+    }
+  }
+
   async function updateTaskDescription(taskId: string, description: string) {
     const before = tasks.find((task) => task.id === taskId)?.description ?? null;
     setTasks((current) =>
@@ -342,6 +373,7 @@ export function useLocalWorkspace() {
     toggleTask,
     postponeTask,
     cancelTask,
+    updateTaskStatus,
     updateTaskDescription
   };
 }
