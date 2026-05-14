@@ -8,6 +8,7 @@ import type { EnergyMode, Priority, TaskStatus } from "@/types/domain";
 export interface LocalTask {
   id: string;
   title: string;
+  description: string | null;
   project: string | null;
   category: string;
   priority: Priority;
@@ -42,6 +43,7 @@ const starterTasks: LocalTask[] = [
   {
     id: "starter-1",
     title: "整理今天的交付清单",
+    description: "把今天必须交付和可以推迟的事情分开。",
     project: "工作站内测",
     category: "日常运营",
     priority: "normal",
@@ -55,6 +57,7 @@ const starterTasks: LocalTask[] = [
   {
     id: "starter-2",
     title: "写课程销售页大纲",
+    description: null,
     project: "新课程开发",
     category: "新课程开发",
     priority: "key",
@@ -68,6 +71,7 @@ const starterTasks: LocalTask[] = [
   {
     id: "starter-3",
     title: "复盘上周内容数据",
+    description: null,
     project: "内容矩阵",
     category: "复盘",
     priority: "high",
@@ -181,6 +185,7 @@ export function useLocalWorkspace() {
     const task: LocalTask = {
       id: crypto.randomUUID(),
       title: input.title,
+      description: null,
       project: input.project || null,
       category: input.project || "日常运营",
       priority: input.priority,
@@ -219,6 +224,7 @@ export function useLocalWorkspace() {
 
       if (data) {
         setTasks((current) => current.map((currentTask) => (currentTask.id === task.id ? taskRowToLocalTask(data) : currentTask)));
+        await recordTaskHistory(data.id, "created", null, { title: data.title });
       }
     }
   }
@@ -247,6 +253,7 @@ export function useLocalWorkspace() {
         })
         .eq("id", taskId);
       if (error) setSyncError(error.message);
+      else await recordTaskHistory(taskId, completed ? "completed" : "reopened", target?.status, completed ? "completed" : "scheduled");
     }
   }
 
@@ -272,6 +279,7 @@ export function useLocalWorkspace() {
         })
         .eq("id", taskId);
       if (error) setSyncError(error.message);
+      else await recordTaskHistory(taskId, "postponed", target?.scheduledDate, nextDate);
     }
   }
 
@@ -284,7 +292,41 @@ export function useLocalWorkspace() {
       const supabase = createSupabaseBrowserClient();
       const { error } = await supabase.from("tasks").update({ status: "cancelled" }).eq("id", taskId);
       if (error) setSyncError(error.message);
+      else await recordTaskHistory(taskId, "cancelled", null, "cancelled");
     }
+  }
+
+  async function updateTaskDescription(taskId: string, description: string) {
+    const before = tasks.find((task) => task.id === taskId)?.description ?? null;
+    setTasks((current) =>
+      current.map((task) => (task.id === taskId ? { ...task, description: description || null } : task))
+    );
+
+    if (storageMode === "supabase") {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("tasks")
+        .update({ description: description || null })
+        .eq("id", taskId);
+      if (error) setSyncError(error.message);
+      else await recordTaskHistory(taskId, "description_changed", before, description || null);
+    }
+  }
+
+  async function recordTaskHistory(taskId: string, eventType: string, beforeValue: unknown, afterValue: unknown) {
+    if (storageMode !== "supabase" || !userId) return;
+
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await supabase.from("task_history").insert({
+      task_id: taskId,
+      user_id: userId,
+      event_type: eventType,
+      before_value: beforeValue === undefined ? null : beforeValue,
+      after_value: afterValue === undefined ? null : afterValue,
+      triggered_by: "user"
+    });
+
+    if (error) setSyncError(error.message);
   }
 
   return {
@@ -299,6 +341,7 @@ export function useLocalWorkspace() {
     addTask,
     toggleTask,
     postponeTask,
-    cancelTask
+    cancelTask,
+    updateTaskDescription
   };
 }

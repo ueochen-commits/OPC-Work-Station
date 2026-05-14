@@ -20,6 +20,7 @@ export function taskRowToLocalTask(row: TaskRow): LocalTask {
   return {
     id: row.id,
     title: row.title,
+    description: row.description,
     project: row.category,
     category: row.category || "日常运营",
     priority: row.priority,

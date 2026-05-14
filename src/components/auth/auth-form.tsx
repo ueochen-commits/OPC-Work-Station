@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { createSupabaseBrowserClient, hasSupabaseBrowserConfig } from "@/lib/supabase/client";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = searchParams.get("next") || "/today";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
     if (!configured) {
       setMessage("Supabase 还没配置。现在会进入本地演示工作台。");
-      window.setTimeout(() => router.push("/today"), 500);
+      window.setTimeout(() => router.push(nextPath), 500);
       return;
     }
 
@@ -49,7 +51,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       return;
     }
 
-    router.push("/today");
+    router.push(nextPath);
     router.refresh();
   }
 

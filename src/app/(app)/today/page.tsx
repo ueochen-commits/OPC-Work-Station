@@ -3,8 +3,10 @@
 import { Pause, RotateCcw, Trash2 } from "lucide-react";
 import { SmartInputBox } from "@/components/tasks/smart-input-box";
 import { TaskComposer } from "@/components/tasks/task-composer";
-import { useLocalWorkspace } from "@/lib/local/tasks";
+import { TaskDetailPanel } from "@/components/tasks/task-detail-panel";
+import { type LocalTask, useLocalWorkspace } from "@/lib/local/tasks";
 import type { EnergyMode } from "@/types/domain";
+import { useState } from "react";
 
 const priorityLabel = {
   high: "高优",
@@ -20,6 +22,7 @@ const modeLabel: Record<EnergyMode, string> = {
 };
 
 export default function TodayPage() {
+  const [selectedTask, setSelectedTask] = useState<LocalTask | null>(null);
   const {
     ready,
     todayTasks,
@@ -31,7 +34,8 @@ export default function TodayPage() {
     addTask,
     toggleTask,
     postponeTask,
-    cancelTask
+    cancelTask,
+    updateTaskDescription
   } = useLocalWorkspace();
 
   const capacity =
@@ -113,7 +117,7 @@ export default function TodayPage() {
 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium">今日任务</h2>
-        <span className="text-xs text-text-muted">点击任务标题可切换完成状态</span>
+        <span className="text-xs text-text-muted">点击任务标题查看详情</span>
       </div>
 
       <section className="space-y-1">
@@ -130,7 +134,7 @@ export default function TodayPage() {
             key={task.id}
           >
             <div className="pt-0.5 text-right text-sm text-text-muted">{task.scheduledTime}</div>
-            <button className="min-w-0 text-left" onClick={() => toggleTask(task.id)}>
+            <button className="min-w-0 text-left" onClick={() => setSelectedTask(task)}>
               <h2
                 className={[
                   "truncate text-sm font-medium",
@@ -170,6 +174,17 @@ export default function TodayPage() {
           </article>
         ))}
       </section>
+
+      <TaskDetailPanel
+        onClose={() => setSelectedTask(null)}
+        onSaveDescription={(taskId, description) => {
+          updateTaskDescription(taskId, description);
+          setSelectedTask((current) =>
+            current && current.id === taskId ? { ...current, description: description || null } : current
+          );
+        }}
+        task={selectedTask}
+      />
     </div>
   );
 }
