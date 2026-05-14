@@ -2,8 +2,8 @@
 
 import { Keyboard, Loader2, Wand2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { parseLocalNaturalTask, type ParsedLocalTask } from "@/lib/local/natural-language";
 import type { Priority } from "@/types/domain";
+import type { ParseResponse, QuickTaskParseResult } from "@/types/parse";
 
 const placeholders = [
   "试试说：明天上午写个广告脚本 2 小时",
@@ -38,17 +38,37 @@ export function SmartInputBox({
   }) => void;
 }) {
   const [input, setInput] = useState("");
-  const [parsed, setParsed] = useState<ParsedLocalTask | null>(null);
+  const [parsed, setParsed] = useState<QuickTaskParseResult | null>(null);
+  const [parseSource, setParseSource] = useState<ParseResponse["source"] | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const placeholder = useMemo(() => placeholders[new Date().getSeconds() % placeholders.length], []);
 
-  function parse() {
+  async function parse() {
     if (!input.trim()) return;
     setSubmitting(true);
-    window.setTimeout(() => {
-      setParsed(parseLocalNaturalTask(input, existingTaskCount));
+    setWarning(null);
+
+    try {
+      const response = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input, existingTaskCount })
+      });
+
+      if (!response.ok) {
+        throw new Error("解析请求失败");
+      }
+
+      const data = (await response.json()) as ParseResponse;
+      setParsed(data.result);
+      setParseSource(data.source);
+      setWarning(data.warning ?? null);
+    } catch (error) {
+      setWarning(error instanceof Error ? error.message : "解析失败，请使用表单输入兜底。");
+    } finally {
       setSubmitting(false);
-    }, 180);
+    }
   }
 
   function create() {
@@ -75,6 +95,7 @@ export function SmartInputBox({
           onChange={(event) => {
             setInput(event.target.value);
             setParsed(null);
+            setWarning(null);
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -102,7 +123,12 @@ export function SmartInputBox({
 
         {parsed ? (
           <div className="mt-3 rounded-md border border-border-default bg-bg-subtle p-3">
-            <div className="mb-2 text-sm font-medium">我会这样创建：</div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">我会这样创建：</div>
+              <span className="rounded-sm bg-bg-muted px-2 py-0.5 text-xs text-text-muted">
+                {parseSource === "deepseek" ? "DeepSeek" : "本地兜底"}
+              </span>
+            </div>
             <dl className="grid gap-2 text-sm md:grid-cols-2">
               <PreviewItem label="标题" value={parsed.title} />
               <PreviewItem label="项目" value={parsed.project || "未归属"} />
@@ -110,6 +136,7 @@ export function SmartInputBox({
               <PreviewItem label="时长" value={`${parsed.estimatedMinutes} 分钟`} />
             </dl>
             {showReasoning ? <p className="mt-2 text-xs text-text-muted">{parsed.reasoning}</p> : null}
+            {warning ? <p className="mt-2 text-xs text-[var(--warning-fg)]">{warning}</p> : null}
             <div className="mt-3 flex justify-end gap-2">
               <button
                 className="h-8 rounded-md border border-border-default px-3 text-sm hover:bg-bg-hover"
@@ -124,6 +151,12 @@ export function SmartInputBox({
                 确认创建
               </button>
             </div>
+          </div>
+        ) : null}
+
+        {!parsed && warning ? (
+          <div className="mt-3 rounded-md border border-border-default bg-[var(--warning-bg)] px-3 py-2 text-sm text-[var(--warning-fg)]">
+            {warning}
           </div>
         ) : null}
 

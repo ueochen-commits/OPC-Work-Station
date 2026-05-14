@@ -1,15 +1,5 @@
 import type { Priority } from "@/types/domain";
-
-export interface ParsedLocalTask {
-  title: string;
-  project?: string;
-  estimatedMinutes: number;
-  priority: Priority;
-  scheduledDate: string;
-  scheduledTime: string;
-  reasoning: string;
-  confidence: number;
-}
+import type { QuickTaskParseResult } from "@/types/parse";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const weekDayMap: Record<string, number> = {
@@ -23,7 +13,7 @@ const weekDayMap: Record<string, number> = {
   六: 6
 };
 
-export function parseLocalNaturalTask(input: string, existingTaskCount = 0): ParsedLocalTask {
+export function parseLocalNaturalTask(input: string, existingTaskCount = 0): QuickTaskParseResult {
   const normalized = input.trim().replace(/\s+/g, " ");
   const estimatedMinutes = parseDuration(normalized);
   const scheduledDate = parseDate(normalized);
