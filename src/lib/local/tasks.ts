@@ -27,8 +27,19 @@ export interface LocalSettings {
   showAiReasoning: boolean;
 }
 
+export interface LocalOutcomeMetric {
+  id: string;
+  metricDate: string;
+  platform: string;
+  metricKey: string;
+  metricValue: number;
+  rawInput: string | null;
+  createdAt: string;
+}
+
 const TASKS_KEY = "opc.local.tasks";
 const SETTINGS_KEY = "opc.local.settings";
+const OUTCOMES_KEY = "opc.local.outcomes";
 
 const defaultSettings: LocalSettings = {
   dailyCapacityMinutes: 360,
@@ -86,6 +97,7 @@ const starterTasks: LocalTask[] = [
 
 export function useLocalWorkspace() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
+  const [outcomes, setOutcomes] = useState<LocalOutcomeMetric[]>([]);
   const [settings, setSettings] = useState<LocalSettings>(defaultSettings);
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -101,6 +113,7 @@ export function useLocalWorkspace() {
 
       if (!hasSupabaseBrowserConfig()) {
         loadLocalTasks();
+        loadLocalOutcomes();
         return;
       }
 
@@ -110,6 +123,7 @@ export function useLocalWorkspace() {
 
       if (!user) {
         loadLocalTasks();
+        loadLocalOutcomes();
         return;
       }
 
@@ -126,12 +140,32 @@ export function useLocalWorkspace() {
       if (error) {
         setSyncError(error.message);
         loadLocalTasks();
+        loadLocalOutcomes();
         return;
       }
+
+      const { data: outcomeData, error: outcomeError } = await supabase
+        .from("outcome_metrics")
+        .select("id,metric_date,platform,metric_key,metric_value,raw_input,created_at")
+        .eq("user_id", user.id)
+        .order("metric_date", { ascending: false });
+
+      if (outcomeError) setSyncError(outcomeError.message);
 
       setUserId(user.id);
       setStorageMode("supabase");
       setTasks((data || []).map(taskRowToLocalTask));
+      setOutcomes(
+        (outcomeData || []).map((row) => ({
+          id: row.id,
+          metricDate: row.metric_date,
+          platform: row.platform,
+          metricKey: row.metric_key,
+          metricValue: Number(row.metric_value),
+          rawInput: row.raw_input,
+          createdAt: row.created_at
+        }))
+      );
       setReady(true);
     }
 
@@ -142,10 +176,17 @@ export function useLocalWorkspace() {
       setReady(true);
     }
 
+    function loadLocalOutcomes() {
+      const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
+      setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
+    }
+
     loadWorkspace().catch((error) => {
       setSyncError(error instanceof Error ? error.message : "Workspace load failed");
       const storedTasks = window.localStorage.getItem(TASKS_KEY);
+      const storedOutcomes = window.localStorage.getItem(OUTCOMES_KEY);
       setTasks(storedTasks ? (JSON.parse(storedTasks) as LocalTask[]) : starterTasks);
+      setOutcomes(storedOutcomes ? (JSON.parse(storedOutcomes) as LocalOutcomeMetric[]) : []);
       setReady(true);
     });
 
@@ -157,6 +198,10 @@ export function useLocalWorkspace() {
   useEffect(() => {
     if (ready && storageMode === "local") window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
   }, [ready, storageMode, tasks]);
+
+  useEffect(() => {
+    if (ready && storageMode === "local") window.localStorage.setItem(OUTCOMES_KEY, JSON.stringify(outcomes));
+  }, [ready, storageMode, outcomes]);
 
   useEffect(() => {
     if (ready) window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -344,6 +389,70 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function addOutcomeMetric(input: {
+    metricDate: string;
+    platform: string;
+    metricKey: string;
+    metricValue: number;
+    rawInput?: string;
+  }) {
+    const metric: LocalOutcomeMetric = {
+      id: crypto.randomUUID(),
+      metricDate: input.metricDate,
+      platform: input.platform,
+      metricKey: input.metricKey,
+      metricValue: input.metricValue,
+      rawInput: input.rawInput || null,
+      createdAt: new Date().toISOString()
+    };
+
+    setOutcomes((current) => [metric, ...current]);
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("outcome_metrics")
+        .upsert(
+          {
+            user_id: userId,
+            metric_date: input.metricDate,
+            platform: input.platform,
+            metric_key: input.metricKey,
+            metric_value: input.metricValue,
+            raw_input: input.rawInput || null
+          },
+          { onConflict: "user_id,metric_date,platform,metric_key" }
+        )
+        .select("id,metric_date,platform,metric_key,metric_value,raw_input,created_at")
+        .single();
+
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+
+      if (data) {
+        const saved: LocalOutcomeMetric = {
+          id: data.id,
+          metricDate: data.metric_date,
+          platform: data.platform,
+          metricKey: data.metric_key,
+          metricValue: Number(data.metric_value),
+          rawInput: data.raw_input,
+          createdAt: data.created_at
+        };
+        setOutcomes((current) => [
+          saved,
+          ...current.filter(
+            (item) =>
+              item.id !== metric.id &&
+              !(item.metricDate === saved.metricDate && item.platform === saved.platform && item.metricKey === saved.metricKey)
+          )
+        ]);
+      }
+    }
+  }
+
   async function recordTaskHistory(taskId: string, eventType: string, beforeValue: unknown, afterValue: unknown) {
     if (storageMode !== "supabase" || !userId) return;
 
@@ -364,6 +473,7 @@ export function useLocalWorkspace() {
     ready,
     tasks,
     todayTasks,
+    outcomes,
     settings,
     scheduledMinutes,
     storageMode,
@@ -374,6 +484,7 @@ export function useLocalWorkspace() {
     postponeTask,
     cancelTask,
     updateTaskStatus,
-    updateTaskDescription
+    updateTaskDescription,
+    addOutcomeMetric
   };
 }
