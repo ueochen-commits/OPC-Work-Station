@@ -539,6 +539,38 @@ export function useLocalWorkspace() {
     }
   }
 
+  async function bulkCancelTasks(scope: { project?: string | null } = {}) {
+    if (!ensureWritable()) return 0;
+
+    const targetTasks = tasks.filter((task) => {
+      if (task.status === "cancelled") return false;
+      if (scope.project === undefined) return true;
+      return (task.project || task.category || "未归属任务") === scope.project;
+    });
+    const targetIds = targetTasks.map((task) => task.id);
+
+    if (targetIds.length === 0) return 0;
+
+    setTasks((current) =>
+      current.map((task) => (targetIds.includes(task.id) ? { ...task, status: "cancelled" } : task))
+    );
+
+    if (storageMode === "supabase" && userId) {
+      const supabase = createSupabaseBrowserClient();
+      let query = supabase.from("tasks").update({ status: "cancelled" }).eq("user_id", userId).neq("status", "cancelled");
+      if (scope.project !== undefined) {
+        query = query.eq("category", scope.project || "日常运营");
+      }
+      const { error } = await query;
+      if (error) {
+        setSyncError(error.message);
+        return targetIds.length;
+      }
+    }
+
+    return targetIds.length;
+  }
+
   async function updateTaskStatus(taskId: string, status: TaskStatus) {
     if (!ensureWritable()) return;
 
@@ -896,6 +928,7 @@ export function useLocalWorkspace() {
     toggleTask,
     postponeTask,
     cancelTask,
+    bulkCancelTasks,
     updateTaskStatus,
     updateTaskDescription,
     addTaskLink,
