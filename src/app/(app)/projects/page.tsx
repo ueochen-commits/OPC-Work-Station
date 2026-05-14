@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { type LocalTask, useLocalWorkspace } from "@/lib/local/tasks";
-import type { TaskStatus } from "@/types/domain";
+import type { Priority, TaskStatus } from "@/types/domain";
 
 const statusGroups: Array<{
   key: TaskStatus;
@@ -23,9 +23,13 @@ const priorityLabel = {
 };
 
 export default function ProjectsPage() {
-  const { tasks, updateTaskStatus, canWrite, readOnlyReason } = useLocalWorkspace();
+  const { tasks, addTask, updateTaskStatus, canWrite, readOnlyReason } = useLocalWorkspace();
   const [view, setView] = useState<"list" | "board">("list");
   const [projectFilter, setProjectFilter] = useState("全部");
+  const [templateProject, setTemplateProject] = useState("视频涨粉计划");
+  const [templateStartDate, setTemplateStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [templateCount, setTemplateCount] = useState(4);
+  const [templateMessage, setTemplateMessage] = useState<string | null>(null);
   const projects = useMemo(() => {
     const map = new Map<string, { total: number; completed: number; minutes: number }>();
     for (const task of tasks.filter((task) => task.status !== "cancelled")) {
@@ -104,6 +108,75 @@ export default function ProjectsPage() {
           <p className="mt-1 text-sm text-text-muted">在今日页创建任务并填写项目名后，这里会自动聚合。</p>
         </div>
       ) : null}
+
+      <section className="mt-6 rounded-lg border border-border-default bg-bg-subtle p-4">
+        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-sm font-medium">长项目模板</h2>
+            <p className="mt-1 text-xs text-text-muted">
+              先支持视频月更项目：每条视频自动生成策划与写脚本、拍摄、剪辑、发布。
+            </p>
+          </div>
+          {templateMessage ? <span className="text-xs text-text-muted">{templateMessage}</span> : null}
+        </div>
+        <form
+          className="grid gap-3 md:grid-cols-[1fr_150px_120px_auto]"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!canWrite) return;
+            const tasksToCreate = buildVideoProductionTasks({
+              projectName: templateProject.trim() || "视频涨粉计划",
+              startDate: templateStartDate,
+              count: templateCount
+            });
+            for (const task of tasksToCreate) {
+              await addTask(task);
+            }
+            setProjectFilter(templateProject.trim() || "视频涨粉计划");
+            setTemplateMessage(`已生成 ${tasksToCreate.length} 个跨日期任务`);
+          }}
+        >
+          <Field label="项目名">
+            <input
+              className="h-9 w-full rounded-md border border-border-default bg-bg-default px-3 text-sm"
+              disabled={!canWrite}
+              onChange={(event) => {
+                setTemplateProject(event.target.value);
+                setTemplateMessage(null);
+              }}
+              value={templateProject}
+            />
+          </Field>
+          <Field label="开始日期">
+            <input
+              className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2 text-sm"
+              disabled={!canWrite}
+              onChange={(event) => setTemplateStartDate(event.target.value)}
+              type="date"
+              value={templateStartDate}
+            />
+          </Field>
+          <Field label="视频数量">
+            <input
+              className="h-9 w-full rounded-md border border-border-default bg-bg-default px-2 text-sm"
+              disabled={!canWrite}
+              max={12}
+              min={1}
+              onChange={(event) => setTemplateCount(Number(event.target.value))}
+              type="number"
+              value={templateCount}
+            />
+          </Field>
+          <div className="flex items-end">
+            <button
+              className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-text-inverse disabled:opacity-50"
+              disabled={!canWrite}
+            >
+              生成计划
+            </button>
+          </div>
+        </form>
+      </section>
 
       <section className="mt-6 border-t border-border-default pt-5">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -288,4 +361,80 @@ function normalizeStatus(status: TaskStatus): TaskStatus {
   if (status === "completed") return "completed";
   if (status === "pending") return "pending";
   return "scheduled";
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label>
+      <span className="mb-1 block text-xs font-medium text-text-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function buildVideoProductionTasks({
+  projectName,
+  startDate,
+  count
+}: {
+  projectName: string;
+  startDate: string;
+  count: number;
+}) {
+  const safeCount = Math.min(12, Math.max(1, count || 1));
+  const tasks: Array<{
+    title: string;
+    project?: string;
+    estimatedMinutes: number;
+    priority: Priority;
+    scheduledDate: string;
+    scheduledTime: string;
+  }> = [];
+
+  for (let index = 0; index < safeCount; index += 1) {
+    const baseDate = addDays(startDate, index * 7);
+    const videoName = `第 ${index + 1} 条视频`;
+    tasks.push(
+      {
+        title: `${videoName}：策划与写脚本`,
+        project: projectName,
+        estimatedMinutes: 120,
+        priority: "key",
+        scheduledDate: baseDate,
+        scheduledTime: "09:00"
+      },
+      {
+        title: `${videoName}：拍摄`,
+        project: projectName,
+        estimatedMinutes: 120,
+        priority: "high",
+        scheduledDate: addDays(baseDate, 2),
+        scheduledTime: "14:00"
+      },
+      {
+        title: `${videoName}：剪辑`,
+        project: projectName,
+        estimatedMinutes: 180,
+        priority: "high",
+        scheduledDate: addDays(baseDate, 4),
+        scheduledTime: "09:00"
+      },
+      {
+        title: `${videoName}：发布与数据记录`,
+        project: projectName,
+        estimatedMinutes: 45,
+        priority: "normal",
+        scheduledDate: addDays(baseDate, 6),
+        scheduledTime: "10:00"
+      }
+    );
+  }
+
+  return tasks;
+}
+
+function addDays(dateInput: string, days: number) {
+  const date = new Date(`${dateInput}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }

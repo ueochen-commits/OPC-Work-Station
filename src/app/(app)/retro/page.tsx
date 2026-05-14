@@ -28,6 +28,10 @@ export default function RetroPage() {
   const [metricValue, setMetricValue] = useState("");
   const [rawReport, setRawReport] = useState("");
   const [parseMessage, setParseMessage] = useState<string | null>(null);
+  const [weeklyInsights, setWeeklyInsights] = useState<Array<{ title: string; detail: string; action: string }>>([]);
+  const [weeklySummary, setWeeklySummary] = useState<string | null>(null);
+  const [insightMessage, setInsightMessage] = useState<string | null>(null);
+  const [generatingInsights, setGeneratingInsights] = useState(false);
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.status === "completed").length;
@@ -257,10 +261,59 @@ export default function RetroPage() {
       </section>
 
       <section className="mt-5 rounded-lg border border-border-default bg-bg-subtle p-4">
-        <h2 className="mb-2 text-sm font-medium">AI 洞察</h2>
-        <p className="text-sm text-text-muted">
-          已有 {outcomes.length} 条运营指标。DeepSeek 洞察接入后，这里会结合任务完成、运营数据和你的自评生成 2-3 条行动建议。
-        </p>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">AI 洞察</h2>
+            <p className="mt-1 text-xs text-text-muted">
+              结合任务完成、运营数据和你的自评生成 2-3 条行动建议。
+            </p>
+          </div>
+          <button
+            className="h-8 rounded-md bg-accent px-3 text-sm font-medium text-text-inverse disabled:opacity-50"
+            disabled={generatingInsights}
+            onClick={async () => {
+              setGeneratingInsights(true);
+              setInsightMessage(null);
+              try {
+                const response = await fetch("/api/reports/weekly", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ weekStartDate })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                  throw new Error(data?.error?.message || "生成周报失败。");
+                }
+                setWeeklySummary(data.summary);
+                setWeeklyInsights(data.insights || []);
+                setInsightMessage(data.source === "deepseek" ? "DeepSeek 已生成" : "已用本地规则生成");
+              } catch (error) {
+                setInsightMessage(error instanceof Error ? error.message : "生成周报失败。");
+              } finally {
+                setGeneratingInsights(false);
+              }
+            }}
+          >
+            {generatingInsights ? "生成中..." : "生成本周洞察"}
+          </button>
+        </div>
+
+        {insightMessage ? <p className="mb-3 text-xs text-text-muted">{insightMessage}</p> : null}
+        {weeklySummary ? <p className="mb-3 text-sm text-text-default">{weeklySummary}</p> : null}
+        <div className="space-y-2">
+          {weeklyInsights.length === 0 ? (
+            <p className="text-sm text-text-muted">
+              已有 {outcomes.length} 条运营指标。填写自评后再生成，洞察会更贴近你的真实体感。
+            </p>
+          ) : null}
+          {weeklyInsights.map((insight) => (
+            <article className="rounded-md border border-border-default bg-bg-default p-3" key={insight.title}>
+              <h3 className="text-sm font-medium">{insight.title}</h3>
+              <p className="mt-1 text-sm text-text-muted">{insight.detail}</p>
+              <p className="mt-2 text-sm text-text-default">{insight.action}</p>
+            </article>
+          ))}
+        </div>
       </section>
     </div>
   );
